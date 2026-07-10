@@ -1,0 +1,26 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Logs (best-effort, tidak perlu di-persist)
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# Settings lokal
+pyrightconfig.json
+
+# OS
+.DS_Store
+Thumbs.db

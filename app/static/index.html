@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Chatbot AD/ART & SOP OSUI Mahawaditra — Tanyakan pertanyaan seputar aturan dan prosedur organisasi." />
+  <title>Chatbot OSUI Mahawaditra</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:       #2563eb;
+      --primary-dark:  #1d4ed8;
+      --primary-light: #eff6ff;
+      --surface:       #ffffff;
+      --surface-2:     #f8fafc;
+      --border:        #e2e8f0;
+      --text:          #0f172a;
+      --text-muted:    #64748b;
+      --bubble-user:   #2563eb;
+      --bubble-bot:    #f1f5f9;
+      --error:         #ef4444;
+      --success:       #22c55e;
+      --radius:        12px;
+      --shadow:        0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', sans-serif;
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    /* ── Layout ── */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      max-width: 780px;
+      margin: 0 auto;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    /* ── Header ── */
+    .header {
+      padding: 16px 20px;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .header-icon {
+      width: 40px; height: 40px;
+      background: rgba(255,255,255,.2);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 1rem; font-weight: 700; line-height: 1.3; }
+    .header-subtitle { font-size: .78rem; opacity: .8; margin-top: 2px; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--success);
+      margin-left: auto;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 2px rgba(34,197,94,.3);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(34,197,94,.3); }
+      50%       { box-shadow: 0 0 0 5px rgba(34,197,94,.1); }
+    }
+
+    /* ── Chat area ── */
+    .chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    /* ── Welcome message ── */
+    .welcome {
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--text-muted);
+    }
+    .welcome-icon { font-size: 48px; margin-bottom: 12px; }
+    .welcome h2 { font-size: 1.1rem; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .welcome p { font-size: .875rem; line-height: 1.6; }
+    .suggestion-chips {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+    .chip {
+      padding: 8px 14px;
+      background: var(--primary-light);
+      color: var(--primary);
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      font-size: .8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+      white-space: nowrap;
+    }
+    .chip:hover { background: #dbeafe; transform: translateY(-1px); }
+
+    /* ── Bubbles ── */
+    .message { display: flex; gap: 10px; max-width: 100%; }
+
+    .message.user { flex-direction: row-reverse; }
+
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .message.user .avatar   { background: var(--bubble-user); color: #fff; }
+    .message.bot .avatar    { background: #e0e7ff; }
+
+    .bubble {
+      max-width: calc(100% - 50px);
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: .9rem;
+      line-height: 1.65;
+      word-break: break-word;
+    }
+    .message.user .bubble {
+      background: var(--bubble-user);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .message.bot .bubble {
+      background: var(--bubble-bot);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+    }
+    .message.bot.error .bubble { background: #fef2f2; color: var(--error); }
+
+    /* Sources */
+    .sources {
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: .78rem;
+      color: var(--text-muted);
+    }
+    .sources-label { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .source-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+    .source-item::before { content: '📄'; font-size: 11px; }
+
+    /* Loading bubble */
+    .loading-dots {
+      display: flex; align-items: center; gap: 5px;
+      padding: 14px 16px;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--text-muted);
+      animation: bounce .9s infinite ease-in-out;
+    }
+    .dot:nth-child(2) { animation-delay: .15s; }
+    .dot:nth-child(3) { animation-delay: .3s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: .4; }
+      40%            { transform: translateY(-6px); opacity: 1; }
+    }
+
+    /* Timeout warning */
+    .timeout-warning {
+      font-size: .8rem;
+      color: #92400e;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-top: 8px;
+      display: none;
+    }
+
+    /* ── Input area ── */
+    .input-area {
+      padding: 12px 16px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    #questionInput {
+      flex: 1;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-family: inherit;
+      font-size: .9rem;
+      resize: none;
+      min-height: 48px;
+      max-height: 140px;
+      outline: none;
+      transition: border-color .2s;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--surface);
+    }
+    #questionInput:focus { border-color: var(--primary); }
+    #questionInput::placeholder { color: var(--text-muted); }
+    #questionInput:disabled { background: var(--surface-2); cursor: not-allowed; }
+
+    #sendBtn {
+      width: 48px; height: 48px;
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      border-radius: var(--radius);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      transition: background .2s, transform .1s;
+      flex-shrink: 0;
+    }
+    #sendBtn:hover:not(:disabled) { background: var(--primary-dark); transform: scale(1.04); }
+    #sendBtn:disabled { background: #94a3b8; cursor: not-allowed; transform: none; }
+
+    .input-hint {
+      font-size: .72rem;
+      color: var(--text-muted);
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .app { max-width: 100%; box-shadow: none; }
+      .header { padding: 14px 16px; }
+      .bubble { font-size: .875rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-icon">🎵</div>
+      <div>
+        <div class="header-title">Chatbot OSUI Mahawaditra</div>
+        <div class="header-subtitle">Asisten AD/ART &amp; SOP Organisasi</div>
+      </div>
+      <div class="status-dot" title="Online"></div>
+    </header>
+
+    <!-- Chat area -->
+    <main class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="Percakapan">
+
+      <div class="welcome" id="welcomeMsg">
+        <div class="welcome-icon">📋</div>
+        <h2>Halo, Mahawaditra! 👋</h2>
+        <p>Tanyakan apa saja seputar AD/ART atau SOP divisi organisasi kita.</p>
+        <div class="suggestion-chips">
+          <button class="chip" onclick="sendSuggestion(this)">Berapa masa jabatan ketua?</button>
+          <button class="chip" onclick="sendSuggestion(this)">Apa syarat menjadi anggota aktif?</button>
+          <button class="chip" onclick="sendSuggestion(this)">Bagaimana prosedur pengajuan dana?</button>
+          <button class="chip" onclick="sendSuggestion(this)">Apa tugas divisi Humas?</button>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Input area -->
+    <footer class="input-area">
+      <div class="input-row">
+        <textarea
+          id="questionInput"
+          placeholder="Ketik pertanyaan tentang AD/ART atau SOP..."
+          rows="1"
+          aria-label="Pertanyaan"
+        ></textarea>
+        <button id="sendBtn" onclick="sendMessage()" aria-label="Kirim pertanyaan">
+          ➤
+        </button>
+      </div>
+      <p class="input-hint">Tekan Enter untuk kirim · Shift+Enter untuk baris baru</p>
+    </footer>
+
+  </div>
+
+  <script>
+    const chatArea     = document.getElementById('chatArea');
+    const input        = document.getElementById('questionInput');
+    const sendBtn      = document.getElementById('sendBtn');
+    const welcomeMsg   = document.getElementById('welcomeMsg');
+    const TIMEOUT_MS   = 30_000;
+
+    // Auto-resize textarea
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+    });
+
+    // Enter kirim, Shift+Enter baris baru
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    function sendSuggestion(btn) {
+      input.value = btn.textContent;
+      sendMessage();
+    }
+
+    function setLoading(isLoading) {
+      input.disabled  = isLoading;
+      sendBtn.disabled = isLoading;
+    }
+
+    function scrollToBottom() {
+      chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' });
+    }
+
+    function appendMessage(role, content, sources = []) {
+      // Hapus welcome message saat ada pesan pertama
+      if (welcomeMsg) welcomeMsg.remove();
+
+      const wrap = document.createElement('div');
+      wrap.className = `message ${role}`;
+      if (role === 'bot' && content.startsWith('⚠️')) wrap.classList.add('error');
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      avatar.textContent = role === 'user' ? '👤' : '🤖';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      const inner = document.createElement('div');
+      inner.className = 'bubble-content';
+      inner.textContent = content;
+      bubble.appendChild(inner);
+
+      // Sumber dokumen
+      if (sources.length > 0) {
+        const srcDiv = document.createElement('div');
+        srcDiv.className = 'sources';
+        srcDiv.innerHTML = `<div class="sources-label">📚 Sumber</div>`;
+        sources.forEach(s => {
+          const item = document.createElement('div');
+          item.className = 'source-item';
+          item.textContent = `${s.file} — Halaman ${s.page}`;
+          srcDiv.appendChild(item);
+        });
+        bubble.appendChild(srcDiv);
+      }
+
+      wrap.appendChild(avatar);
+      wrap.appendChild(bubble);
+      chatArea.appendChild(wrap);
+      scrollToBottom();
+      return wrap;
+    }
+
+    function appendLoading() {
+      if (welcomeMsg) welcomeMsg.remove();
+
+      const wrap = document.createElement('div');
+      wrap.className = 'message bot';
+      wrap.id = 'loadingMsg';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      avatar.textContent = '🤖';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      const dots = document.createElement('div');
+      dots.className = 'loading-dots';
+      dots.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+
+      const warning = document.createElement('div');
+      warning.className = 'timeout-warning';
+      warning.id = 'timeoutWarning';
+      warning.textContent = '⏳ Permintaan memakan waktu lebih lama dari biasanya. Silakan tunggu atau coba lagi.';
+
+      bubble.appendChild(dots);
+      bubble.appendChild(warning);
+      wrap.appendChild(avatar);
+      wrap.appendChild(bubble);
+      chatArea.appendChild(wrap);
+      scrollToBottom();
+      return wrap;
+    }
+
+    function removeLoading() {
+      const el = document.getElementById('loadingMsg');
+      if (el) el.remove();
+    }
+
+    async function sendMessage() {
+      const question = input.value.trim();
+      if (!question) return;
+
+      // Tampilkan pesan user
+      appendMessage('user', question);
+      input.value = '';
+      input.style.height = 'auto';
+
+      // Tampilkan loading SEGERA (penting untuk cold start)
+      setLoading(true);
+      const loadingEl = appendLoading();
+
+      // Timer timeout 30 detik
+      const timeoutId = setTimeout(() => {
+        const w = document.getElementById('timeoutWarning');
+        if (w) w.style.display = 'block';
+        scrollToBottom();
+      }, TIMEOUT_MS);
+
+      try {
+        const controller = new AbortController();
+        // Abort setelah 60 detik (hard limit)
+        const hardTimeout = setTimeout(() => controller.abort(), 60_000);
+
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: question }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(hardTimeout);
+        clearTimeout(timeoutId);
+        removeLoading();
+
+        const data = await res.json();
+
+        if (!res.ok || !data.answer) {
+          appendMessage('bot', '⚠️ ' + (data.answer || 'Terjadi kesalahan. Silakan coba lagi.'));
+        } else {
+          appendMessage('bot', data.answer, data.sources || []);
+        }
+
+      } catch (err) {
+        clearTimeout(timeoutId);
+        removeLoading();
+        if (err.name === 'AbortError') {
+          appendMessage('bot', '⚠️ Permintaan habis waktu. Silakan coba lagi.');
+        } else {
+          appendMessage('bot', '⚠️ Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
+        }
+      } finally {
+        setLoading(false);
+        input.focus();
+      }
+    }
+  </script>
+</body>
+</html>

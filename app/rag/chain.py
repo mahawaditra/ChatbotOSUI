@@ -23,7 +23,7 @@ EMPTY_DB_MESSAGE = "Sistem belum memiliki dokumen. Silakan hubungi pengurus."
 RATE_LIMIT_MESSAGE = "Maaf, sedang banyak yang bertanya. Silakan coba lagi dalam beberapa menit."
 
 
-def get_answer(question: str) -> dict[str, Any]:
+def get_answer(question: str, history: list[dict] | None = None) -> dict[str, Any]:
     """
     Pipeline RAG lengkap: retrieval → build prompt → LLM → return jawaban.
 
@@ -52,7 +52,7 @@ def get_answer(question: str) -> dict[str, Any]:
     context = "\n\n---\n\n".join(context_parts)
 
     # 3. Bangun prompt
-    prompt = build_prompt(context=context, question=question)
+    prompt = build_prompt(context=context, question=question, history=history)
 
     # 4. Panggil Gemini LLM dengan retry 1x jika rate limit
     answer_text = _call_llm_with_retry(prompt)
@@ -88,7 +88,8 @@ def _call_llm_with_retry(prompt: str) -> str:
                 model=LLM_MODEL,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
-                    temperature=0.1,  # rendah agar jawaban konsisten & faktual
+                    temperature=0.1,
+                    max_output_tokens=2048,
                 ),
             )
             return response.text

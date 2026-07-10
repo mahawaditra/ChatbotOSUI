@@ -18,6 +18,9 @@ COPY app/ ./app/
 # Copy dokumen PDF ke dalam image
 COPY dokumen/ ./dokumen/
 
+# Copy Logo untuk web interface
+COPY Logo.png ./Logo.png
+
 # Expose port 8080 (standar Render)
 EXPOSE 8080
 

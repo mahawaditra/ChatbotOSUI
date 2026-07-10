@@ -15,11 +15,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
-from app.config import ADMIN_KEY
+from app.config import ADMIN_KEY, LLM_MODEL
 from app.rag.chain import get_answer, RATE_LIMIT_MESSAGE
 from app.rag.indexing import run_indexing
 
@@ -46,10 +46,43 @@ app = FastAPI(
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Batas panjang input
+MAX_QUESTION_LENGTH = 500
+MAX_HISTORY_ITEM_LENGTH = 800
+
 
 # --- Pydantic models ---
+class HistoryItem(BaseModel):
+    role: str      # "user" atau "bot"
+    content: str
+
+    @field_validator('role')
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in ('user', 'bot'):
+            raise ValueError("role harus 'user' atau 'bot'")
+        return v
+
+    @field_validator('content')
+    @classmethod
+    def sanitize_content(cls, v: str) -> str:
+        # Potong jika terlalu panjang
+        return v[:MAX_HISTORY_ITEM_LENGTH]
+
+
 class ChatRequest(BaseModel):
     message: str
+    history: list[HistoryItem] = []  # Riwayat chat dari frontend
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Pertanyaan tidak boleh kosong.")
+        if len(v) > MAX_QUESTION_LENGTH:
+            raise ValueError(f"Pertanyaan terlalu panjang (maks {MAX_QUESTION_LENGTH} karakter).")
+        return v
 
 
 class ChatResponse(BaseModel):
@@ -67,7 +100,7 @@ def _log_request(question: str, answer: str, sources: list, latency_ms: float, s
         "sources": [f"{s['file']} hal. {s['page']}" for s in sources],
         "chunks_retrieved": len(sources),
         "latency_ms": round(latency_ms, 2),
-        "llm_model": "gemini-2.0-flash",
+        "llm_model": LLM_MODEL,
         "status": status,
     }
 
@@ -80,6 +113,15 @@ def _log_request(question: str, answer: str, sources: list, latency_ms: float, s
 
 
 # --- Endpoints ---
+
+@app.get("/Logo.png", include_in_schema=False)
+async def serve_logo():
+    """Serve logo OSUI dari root project."""
+    logo_path = Path(__file__).parent.parent / "Logo.png"
+    if not logo_path.exists():
+        raise HTTPException(status_code=404, detail="Logo tidak ditemukan.")
+    return FileResponse(str(logo_path), media_type="image/png")
+
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_index():
@@ -107,7 +149,8 @@ async def chat(request: ChatRequest):
     status = "success"
 
     try:
-        result = get_answer(request.message)
+        history = [{"role": h.role, "content": h.content} for h in request.history]
+        result = get_answer(request.message, history=history)
         answer = result["answer"]
         sources = result["sources"]
 

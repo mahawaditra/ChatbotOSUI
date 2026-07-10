@@ -30,7 +30,7 @@ DOKUMEN_DIR: Path = Path(__file__).parent.parent / "dokumen"
 # --- RAG settings ---
 CHUNK_SIZE: int = 1000
 CHUNK_OVERLAP: int = 200
-TOP_K: int = 3  # jumlah chunks yang diambil saat retrieval
+TOP_K: int = 5  # jumlah chunks yang diambil saat retrieval
 
 # --- LLM settings ---
 LLM_MODEL: str = "gemini-3.1-flash-lite"

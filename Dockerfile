@@ -24,5 +24,5 @@ COPY Logo.png ./Logo.png
 # Expose port 8080 (standar Render)
 EXPOSE 8080
 
-# Jalankan FastAPI dengan uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Jalankan FastAPI dengan uvicorn — PORT di-inject Railway secara otomatis
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

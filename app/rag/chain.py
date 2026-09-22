@@ -12,38 +12,49 @@ from google.genai import types as genai_types
 
 from app.config import GEMINI_API_KEY, LLM_MODEL
 from app.rag.retrieval import retrieve_context
-from app.rag.prompts import build_prompt
+from app.rag.prompts import build_prompt, build_rewrite_prompt
 
 logger = logging.getLogger(__name__)
 
 # Inisialisasi Gemini client (SDK baru)
 _client = genai.Client(api_key=GEMINI_API_KEY)
 
-EMPTY_DB_MESSAGE = "Sistem belum memiliki dokumen. Silakan hubungi pengurus."
+# Dipakai baik saat index benar-benar kosong maupun saat semua chunk hasil retrieval
+# di bawah SIMILARITY_THRESHOLD (pertanyaan di luar topik dokumen) — kalimat yang sama
+# dengan instruksi penolakan di SYSTEM_PROMPT, supaya konsisten dari sudut pandang user.
+NO_CONTEXT_MESSAGE = "Maaf, informasi tersebut tidak ditemukan dalam dokumen AD/ART atau SOP organisasi."
 RATE_LIMIT_MESSAGE = "Maaf, sedang banyak yang bertanya. Silakan coba lagi dalam beberapa menit."
+
+# Jumlah item history terakhir yang dipakai untuk query rewriting (menjaga prompt tetap pendek)
+REWRITE_HISTORY_WINDOW = 4
 
 
 def get_answer(question: str, history: list[dict] | None = None) -> dict[str, Any]:
     """
-    Pipeline RAG lengkap: retrieval → build prompt → LLM → return jawaban.
+    Pipeline RAG lengkap: rewrite query (jika ada history) → retrieval → build prompt → LLM → jawaban.
 
     Args:
         question: Pertanyaan dari user
 
     Returns:
-        Dict berisi {answer, sources}
+        Dict berisi {answer, sources, retrieval_query}
         sources adalah list of {file, page}
+        retrieval_query adalah query standalone yang dipakai untuk retrieval (untuk logging/debug)
     """
-    # 1. Retrieve context dari Upstash Vector
-    chunks = retrieve_context(question)
+    # 1. Rewrite pertanyaan jadi standalone query untuk retrieval (hanya jika ada history)
+    retrieval_query = _rewrite_query_for_retrieval(question, history)
+
+    # 2. Retrieve context dari Upstash Vector
+    chunks = retrieve_context(retrieval_query)
 
     if not chunks:
         return {
-            "answer": EMPTY_DB_MESSAGE,
+            "answer": NO_CONTEXT_MESSAGE,
             "sources": [],
+            "retrieval_query": retrieval_query,
         }
 
-    # 2. Bangun context string dari chunks
+    # 3. Bangun context string dari chunks
     context_parts = []
     for i, chunk in enumerate(chunks, 1):
         context_parts.append(
@@ -51,13 +62,14 @@ def get_answer(question: str, history: list[dict] | None = None) -> dict[str, An
         )
     context = "\n\n---\n\n".join(context_parts)
 
-    # 3. Bangun prompt
+    # 4. Bangun prompt (pakai `question` asli, bukan hasil rewrite, agar jawaban & sitasi
+    #    tetap mengikuti kalimat asli user)
     prompt = build_prompt(context=context, question=question, history=history)
 
-    # 4. Panggil Gemini LLM dengan retry 1x jika rate limit
+    # 5. Panggil Gemini LLM dengan retry 1x jika rate limit
     answer_text = _call_llm_with_retry(prompt)
 
-    # 5. Format sources (deduplikasi file+page yang sama)
+    # 6. Format sources (deduplikasi file+page yang sama)
     seen = set()
     sources = []
     for chunk in chunks:
@@ -69,7 +81,47 @@ def get_answer(question: str, history: list[dict] | None = None) -> dict[str, An
     return {
         "answer": answer_text,
         "sources": sources,
+        "retrieval_query": retrieval_query,
     }
+
+
+def _rewrite_query_for_retrieval(question: str, history: list[dict] | None) -> str:
+    """
+    Mengubah pertanyaan lanjutan (yang mungkin mengandalkan konteks percakapan sebelumnya,
+    mis. "terus kalau telat gimana?") menjadi standalone query untuk retrieval, dengan
+    memanggil LLM 1x. Tidak pernah melempar exception — kalau gagal, fallback ke `question` asli
+    supaya langkah opsional ini tidak pernah menggagalkan alur jawaban utama.
+
+    Args:
+        question: Pertanyaan terbaru dari user
+        history: Riwayat percakapan, atau None/kosong untuk pertanyaan pertama
+
+    Returns:
+        Standalone query untuk dipakai di retrieve_context(); `question` asli kalau
+        tidak ada history atau rewrite gagal
+    """
+    if not history:
+        return question
+
+    try:
+        prompt = build_rewrite_prompt(question, history[-REWRITE_HISTORY_WINDOW:])
+        response = _client.models.generate_content(
+            model=LLM_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=150,
+            ),
+        )
+        rewritten = (response.text or "").strip()
+        if rewritten:
+            logger.debug(f"Query rewrite: '{question}' -> '{rewritten}'")
+            return rewritten
+        return question
+
+    except Exception as e:
+        logger.warning(f"Query rewriting gagal, pakai pertanyaan asli: {e}")
+        return question
 
 
 def _call_llm_with_retry(prompt: str) -> str:

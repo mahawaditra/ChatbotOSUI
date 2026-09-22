@@ -1,367 +1,1288 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Chatbot AD/ART & SOP OSUI Mahawaditra — Tanyakan pertanyaan seputar aturan dan prosedur organisasi." />
+  <meta name="description" content="Chatbot AD/ART & SOP OSUI Mahawaditra — Asisten cerdas seputar peraturan dan prosedur Orkes Simfoni Universitas Indonesia." />
   <title>Chatbot OSUI Mahawaditra</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <!-- Marked.js untuk render markdown -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  <!-- Favicon Logo OSUI Mahawaditra untuk Browser Chrome -->
+  <!-- Pakai versi kecil (bukan Logo.png asli 6250x6250px) — banyak browser gagal
+       menampilkan favicon dari sumber seukuran itu dan fallback ke ikon kosong. -->
+  <link rel="icon" type="image/png" href="/static/favicon-32.png" />
+  <link rel="shortcut icon" type="image/png" href="/static/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/static/favicon-180.png" />
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <!-- Marked.js untuk Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+
+  <style>
+    /* ==========================================================================
+       CSS VARIABLES & THEMES
+       ========================================================================== */
     :root {
-      --primary:       #111111;
-      --primary-hover: #333333;
-      --surface:       #ffffff;
-      --surface-2:     #f7f7f7;
-      --border:        #e0e0e0;
-      --text:          #111111;
-      --text-muted:    #666666;
-      --bubble-user:   #111111;
-      --bubble-bot:    #f2f2f2;
-      --accent:        #444444;
-      --radius:        12px;
-      --shadow:        0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+      /* Dark Theme (Default) - Luxury Symphony Dark */
+      --bg-gradient: radial-gradient(circle at 50% 0%, #151d33 0%, #090d16 65%, #05070c 100%);
+      --surface-bg: rgba(15, 23, 42, 0.75);
+      --surface-card: rgba(26, 38, 64, 0.6);
+      --surface-card-hover: rgba(36, 52, 86, 0.85);
+      --surface-input: rgba(11, 17, 31, 0.85);
+      --border-color: rgba(255, 255, 255, 0.1);
+      --border-focus: #f5b800;
+      
+      --text-main: #f8fafc;
+      --text-sub: #94a3b8;
+      --text-muted: #64748b;
+      
+      --primary-accent: #f5b800;
+      --primary-gradient: linear-gradient(135deg, #f5b800 0%, #ff8c00 100%);
+      --accent-indigo: #6366f1;
+      --accent-indigo-bg: rgba(99, 102, 241, 0.15);
+      
+      --user-bubble-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      --user-bubble-border: rgba(245, 184, 0, 0.25);
+      --bot-bubble-bg: rgba(17, 24, 39, 0.7);
+      --bot-bubble-border: rgba(255, 255, 255, 0.08);
+
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-full: 9999px;
+      
+      --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.25);
+      --shadow-glow: 0 0 25px rgba(245, 184, 0, 0.15);
+      
+      --backdrop-blur: blur(16px);
+      --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      --sidebar-width: 320px;
     }
 
+    [data-theme="light"] {
+      --bg-gradient: radial-gradient(circle at 50% 0%, #f1f5f9 0%, #e2e8f0 70%, #cbd5e1 100%);
+      --surface-bg: rgba(255, 255, 255, 0.85);
+      --surface-card: rgba(255, 255, 255, 0.75);
+      --surface-card-hover: rgba(241, 245, 249, 0.95);
+      --surface-input: #ffffff;
+      --border-color: rgba(0, 0, 0, 0.08);
+      --border-focus: #d97706;
+      
+      --text-main: #0f172a;
+      --text-sub: #475569;
+      --text-muted: #64748b;
+      
+      --primary-accent: #d97706;
+      --primary-gradient: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+      --accent-indigo: #4f46e5;
+      --accent-indigo-bg: rgba(79, 70, 229, 0.1);
+      
+      --user-bubble-bg: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      --user-bubble-border: rgba(217, 119, 6, 0.3);
+      --bot-bubble-bg: #ffffff;
+      --bot-bubble-border: rgba(0, 0, 0, 0.08);
+      
+      --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.06);
+      --shadow-glow: 0 0 20px rgba(217, 119, 6, 0.15);
+    }
+
+    /* Reset & Base */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
     html, body {
       height: 100%;
-      font-family: 'Inter', sans-serif;
-      background: var(--surface-2);
-      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-gradient);
+      background-attachment: fixed;
+      color: var(--text-main);
+      overflow: hidden;
     }
 
-    /* ── Layout ── */
-    .app {
+    h1, h2, h3, h4, .brand-title {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    /* Ambient Background Glow */
+    .ambient-glow {
+      position: fixed;
+      top: -150px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(245, 184, 0, 0.12) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 70%);
+      filter: blur(60px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ==========================================================================
+       LAYOUT APP STRUCTURE
+       ========================================================================== */
+    .app-wrapper {
+      display: flex;
+      height: 100dvh;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Sidebar Drawer */
+    .sidebar {
+      width: var(--sidebar-width);
+      height: 100%;
+      background: var(--surface-bg);
+      backdrop-filter: var(--backdrop-blur);
+      -webkit-backdrop-filter: var(--backdrop-blur);
+      border-right: 1px solid var(--border-color);
       display: flex;
       flex-direction: column;
-      height: 100dvh;
-      max-width: 780px;
-      margin: 0 auto;
-      background: var(--surface);
-      box-shadow: var(--shadow);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 100;
+      flex-shrink: 0;
     }
 
-    /* ── Header ── */
-    .header {
-      padding: 16px 20px;
-      background: var(--primary);
-      color: #fff;
+    .sidebar.closed {
+      transform: translateX(-100%);
+      margin-left: calc(-1 * var(--sidebar-width));
+    }
+
+    .sidebar-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-      border-bottom: 2px solid #000;
-    }
-    .header-icon {
-      width: 40px; height: 40px;
-      border-radius: 10px;
-      overflow: hidden;
-      flex-shrink: 0;
-      border: 1px solid rgba(255,255,255,.25);
-    }
-    .header-icon img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
-    .header-title { font-size: 1rem; font-weight: 700; line-height: 1.3; }
-    .header-subtitle { font-size: .78rem; opacity: .65; margin-top: 2px; }
-    .status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: #ffffff;
-      margin-left: auto;
-      flex-shrink: 0;
-      opacity: .9;
-      animation: pulse 2.5s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: .9; transform: scale(1); }
-      50%       { opacity: .5; transform: scale(1.2); }
+      justify-content: space-between;
     }
 
-    /* ── Chat area ── */
-    .chat-area {
+    .sidebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sidebar-brand img {
+      width: 32px;
+      height: 32px;
+      object-fit: contain;
+    }
+
+    .sidebar-brand-text {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .btn-close-sidebar {
+      background: none;
+      border: none;
+      color: var(--text-sub);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition-fast);
+    }
+    .btn-close-sidebar:hover { background: var(--border-color); color: var(--text-main); }
+
+    .sidebar-content {
       flex: 1;
       overflow-y: auto;
-      padding: 20px 16px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 16px;
-      scroll-behavior: smooth;
     }
 
-    /* ── Welcome ── */
-    .welcome {
-      text-align: center;
-      padding: 32px 16px;
+    /* Search Box inside Sidebar */
+    .sidebar-search {
+      position: relative;
+    }
+    .sidebar-search input {
+      width: 100%;
+      padding: 10px 14px 10px 36px;
+      background: var(--surface-input);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      color: var(--text-main);
+      font-size: 0.85rem;
+      outline: none;
+      transition: var(--transition-fast);
+    }
+    .sidebar-search input:focus { border-color: var(--border-focus); }
+    .sidebar-search svg {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
       color: var(--text-muted);
+      pointer-events: none;
     }
-    .welcome-icon { font-size: 48px; margin-bottom: 12px; }
-    .welcome h2 { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 8px; }
-    .welcome p { font-size: .875rem; line-height: 1.6; }
-    .suggestion-chips {
-      display: flex; flex-wrap: wrap; gap: 8px;
-      justify-content: center;
-      margin-top: 16px;
+
+    /* Sidebar Section Title */
+    .sidebar-section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
     }
-    .chip {
-      padding: 8px 14px;
-      background: var(--surface);
-      color: var(--text);
-      border: 1.5px solid var(--border);
-      border-radius: 999px;
-      font-size: .8rem;
-      font-weight: 500;
+
+    /* Nav Button for Chat Mode */
+    .btn-nav-chat {
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--surface-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      color: var(--text-main);
+      font-size: 0.85rem;
+      font-weight: 600;
       cursor: pointer;
-      transition: background .15s, border-color .15s, transform .1s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: var(--transition-fast);
+      margin-bottom: 4px;
+    }
+    .btn-nav-chat:hover, .btn-nav-chat.active {
+      background: var(--surface-card-hover);
+      border-color: var(--border-focus);
+      color: var(--primary-accent);
+    }
+
+    /* PDF Document List Item */
+    .doc-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .doc-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      background: var(--surface-card);
+      border: 1px solid var(--border-color);
+      font-size: 0.8rem;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .doc-item:hover, .doc-item.active {
+      background: var(--surface-card-hover);
+      border-color: var(--border-focus);
+      color: var(--primary-accent);
+      transform: translateX(3px);
+    }
+    .doc-item svg { color: var(--accent-indigo); flex-shrink: 0; }
+    .doc-item-info {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .doc-item-title {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .chip:hover {
-      background: var(--primary);
-      color: #fff;
-      border-color: var(--primary);
-      transform: translateY(-1px);
-    }
-
-    /* ── Bubbles ── */
-    .message { display: flex; gap: 10px; max-width: 100%; }
-    .message.user { flex-direction: row-reverse; }
-
-    .avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      overflow: hidden;
-      flex-shrink: 0;
-      margin-top: 2px;
-      border: 1.5px solid var(--border);
-      background: #fff;
-    }
-    .message.user .avatar { border-color: var(--primary); }
-    .avatar img { width: 100%; height: 100%; object-fit: contain; }
-
-    .bubble {
-      max-width: calc(100% - 50px);
-      padding: 12px 16px;
-      border-radius: var(--radius);
-      font-size: .9rem;
-      line-height: 1.7;
-      word-break: break-word;
-      border: 1px solid transparent;
-    }
-    .message.user .bubble {
-      background: var(--bubble-user);
-      color: #fff;
-      border-color: #000;
-      border-bottom-right-radius: 4px;
-    }
-    .message.bot .bubble {
-      background: var(--bubble-bot);
-      color: var(--text);
-      border-color: var(--border);
-      border-bottom-left-radius: 4px;
-    }
-    .message.bot.error .bubble {
-      background: #fafafa;
-      border-color: #ccc;
-      color: #555;
-    }
-
-    /* Markdown dalam bubble bot */
-    .bubble-content p  { margin-bottom: .6em; }
-    .bubble-content p:last-child { margin-bottom: 0; }
-    .bubble-content ul,
-    .bubble-content ol { padding-left: 1.4em; margin-bottom: .6em; }
-    .bubble-content li { margin-bottom: .25em; }
-    .bubble-content strong { font-weight: 700; }
-    .bubble-content em { font-style: italic; }
-    .bubble-content code {
-      background: rgba(0,0,0,.06);
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-size: .85em;
-      font-family: monospace;
-    }
-
-    /* Sources */
-    .sources {
-      margin-top: 10px;
-      padding: 8px 10px;
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: .78rem;
+    .doc-item-sub {
+      font-size: 0.7rem;
       color: var(--text-muted);
     }
-    .sources-label { font-weight: 600; color: var(--text); margin-bottom: 4px; font-size: .8rem; }
-    .source-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-    .source-item::before { content: '📄'; font-size: 11px; }
 
-    /* Loading */
-    .loading-dots {
-      display: flex; align-items: center; gap: 5px;
+    /* Backdrop for mobile drawer */
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      z-index: 90;
+    }
+    .sidebar-backdrop.active { display: block; }
+
+    /* ==========================================================================
+       MAIN CONTENT AREA (CHATBOT VIEW OR PDF VIEWER VIEW)
+       ========================================================================== */
+    .main-chat {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+      background: transparent;
+    }
+
+    /* Header Navbar */
+    .chat-header {
+      height: 64px;
+      padding: 0 20px;
+      background: var(--surface-bg);
+      backdrop-filter: var(--backdrop-blur);
+      -webkit-backdrop-filter: var(--backdrop-blur);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-header-icon {
+      background: var(--surface-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .btn-header-icon:hover {
+      background: var(--surface-card-hover);
+      border-color: var(--border-focus);
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header-logo-container {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      padding: 4px;
+      background: linear-gradient(135deg, rgba(245,184,0,0.3) 0%, rgba(99,102,241,0.2) 100%);
+      border: 1px solid var(--border-color);
+    }
+    .header-logo-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .header-info .brand-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-info .brand-subtitle {
+      font-size: 0.76rem;
+      color: var(--text-sub);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot-active {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ==========================================================================
+       CHAT STREAM AREA
+       ========================================================================== */
+    .view-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .chat-stream {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      scroll-behavior: smooth;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* Welcome Hero Banner */
+    .welcome-hero {
+      text-align: center;
+      padding: 32px 20px;
+      margin: auto 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      animation: fadeSlideUp 0.5s ease-out;
+    }
+
+    .hero-icon-wrapper {
+      width: 72px;
+      height: 72px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, rgba(245, 184, 0, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
+      border: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-glow);
+    }
+    .hero-icon-wrapper img { width: 44px; height: 44px; object-fit: contain; }
+
+    .welcome-hero h2 {
+      font-size: 1.4rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, var(--text-main) 30%, var(--text-sub) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .welcome-hero p {
+      font-size: 0.9rem;
+      color: var(--text-sub);
+      max-width: 520px;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    /* Hero Cards Grid for First Chat Session */
+    .hero-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .hero-card {
+      padding: 14px 16px;
+      background: var(--surface-card);
+      backdrop-filter: var(--backdrop-blur);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      text-align: left;
+      cursor: pointer;
+      transition: var(--transition-fast);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .hero-card:hover {
+      background: var(--surface-card-hover);
+      border-color: var(--border-focus);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+    }
+    .hero-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--primary-accent);
+    }
+    .hero-card-title {
+      font-size: 0.85rem;
+      color: var(--text-main);
+      line-height: 1.4;
+    }
+
+    /* Message Item Rows */
+    .message-row {
+      display: flex;
+      gap: 12px;
+      max-width: 88%;
+      animation: fadeSlideUp 0.3s ease-out;
+    }
+
+    .message-row.user {
+      margin-left: auto;
+      flex-direction: row-reverse;
+    }
+
+    .message-row.bot {
+      margin-right: auto;
+    }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 1px solid var(--border-color);
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    .message-row.user .avatar {
+      background: var(--primary-gradient);
+      color: #000;
+      border: none;
+    }
+
+    .message-row.bot .avatar {
+      background: rgba(15, 23, 42, 0.9);
+      padding: 4px;
+    }
+    .message-row.bot .avatar img { width: 100%; height: 100%; object-fit: contain; }
+
+    .bubble-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 100%;
+    }
+
+    .bubble {
+      padding: 14px 18px;
+      border-radius: var(--radius-lg);
+      font-size: 0.92rem;
+      line-height: 1.65;
+      word-break: break-word;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .message-row.user .bubble {
+      background: var(--user-bubble-bg);
+      border: 1px solid var(--user-bubble-border);
+      color: #ffffff;
+      border-top-right-radius: 4px;
+    }
+
+    .message-row.bot .bubble {
+      background: var(--bot-bubble-bg);
+      border: 1px solid var(--bot-bubble-border);
+      color: var(--text-main);
+      backdrop-filter: var(--backdrop-blur);
+      border-top-left-radius: 4px;
+    }
+
+    .message-row.bot.error .bubble {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #f87171;
+    }
+
+    /* Markdown Styling in Bot Bubbles */
+    .bubble-content p { margin-bottom: 0.75em; }
+    .bubble-content p:last-child { margin-bottom: 0; }
+    .bubble-content ul, .bubble-content ol { padding-left: 1.5em; margin-bottom: 0.75em; }
+    .bubble-content li { margin-bottom: 0.3em; }
+    .bubble-content strong { font-weight: 700; color: var(--primary-accent); }
+    .bubble-content em { font-style: italic; opacity: 0.9; }
+    .bubble-content blockquote {
+      border-left: 3px solid var(--primary-accent);
+      padding-left: 12px;
+      margin: 8px 0;
+      color: var(--text-sub);
+      font-style: italic;
+    }
+    .bubble-content code {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 0.85em;
+      color: var(--primary-accent);
+    }
+    .bubble-content pre {
+      background: #090d16;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    .bubble-content pre code { background: none; padding: 0; color: #e2e8f0; }
+    .bubble-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 0.85rem;
+    }
+    .bubble-content th, .bubble-content td {
+      border: 1px solid var(--border-color);
+      padding: 8px 12px;
+      text-align: left;
+    }
+    .bubble-content th { background: rgba(255, 255, 255, 0.05); font-weight: 700; }
+
+    /* Sources Accordion Card */
+    .sources-accordion {
+      margin-top: 10px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      background: rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+    }
+    .sources-header {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-sub);
+      user-select: none;
+      transition: var(--transition-fast);
+    }
+    .sources-header:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-main); }
+    .sources-header-title { display: flex; align-items: center; gap: 6px; }
+    .sources-body {
+      padding: 8px 12px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .source-chip {
+      font-size: 0.73rem;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      background: var(--accent-indigo-bg);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .source-chip:hover {
+      background: var(--primary-accent);
+      color: #000;
+      border-color: var(--primary-accent);
+    }
+
+    /* Bot Message Action Toolbar */
+    .message-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      padding: 0 4px;
+    }
+    .btn-action-sm {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: var(--transition-fast);
+    }
+    .btn-action-sm:hover { background: var(--surface-card); color: var(--text-main); }
+
+    /* Loading Shimmer Dots */
+    .loading-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       padding: 4px 0;
     }
-    .dot {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--text-muted);
-      animation: bounce .9s infinite ease-in-out;
+    .loading-text { font-size: 0.82rem; color: var(--text-sub); font-style: italic; }
+    .loading-dots { display: flex; gap: 4px; }
+    .loading-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary-accent);
+      animation: pulseDot 1.2s infinite ease-in-out;
     }
-    .dot:nth-child(2) { animation-delay: .15s; }
-    .dot:nth-child(3) { animation-delay: .3s; }
-    @keyframes bounce {
-      0%, 80%, 100% { transform: translateY(0); opacity: .35; }
-      40%            { transform: translateY(-6px); opacity: 1; }
+    .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(0.6); opacity: 0.4; }
+      50% { transform: scale(1.2); opacity: 1; }
     }
 
-    /* Timeout */
-    .timeout-warning {
-      font-size: .8rem;
-      color: #555;
-      background: #f5f5f5;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 8px 12px;
-      margin-top: 8px;
+    /* ==========================================================================
+       PDF DOCUMENT VIEWER MODE
+       ========================================================================== */
+    .pdf-viewer-container {
       display: none;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      background: #0b0f19;
+      animation: fadeSlideUp 0.3s ease-out;
+    }
+    .pdf-viewer-container.active {
+      display: flex;
     }
 
-    /* ── Input area ── */
-    .input-area {
-      padding: 12px 16px 16px;
-      border-top: 1.5px solid var(--border);
-      background: var(--surface);
+    .pdf-viewer-bar {
+      padding: 10px 16px;
+      background: var(--surface-bg);
+      backdrop-filter: var(--backdrop-blur);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .pdf-viewer-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pdf-viewer-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       flex-shrink: 0;
     }
+
+    .btn-pdf-action {
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      background: var(--surface-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: var(--transition-fast);
+      text-decoration: none;
+    }
+    .btn-pdf-action:hover {
+      background: var(--surface-card-hover);
+      border-color: var(--border-focus);
+      color: var(--primary-accent);
+    }
+
+    .pdf-iframe {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #1e293b;
+    }
+
+    /* ==========================================================================
+       FLOATING INPUT DOCK AREA
+       ========================================================================== */
+    .input-dock-container {
+      padding: 12px 20px 20px;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .input-dock {
+      background: var(--surface-bg);
+      backdrop-filter: var(--backdrop-blur);
+      -webkit-backdrop-filter: var(--backdrop-blur);
+      border: 1.5px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 10px 14px 8px 16px;
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition-fast);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .input-dock:focus-within {
+      border-color: var(--border-focus);
+      box-shadow: var(--shadow-glow);
+    }
+
     .input-row {
       display: flex;
-      gap: 10px;
       align-items: flex-end;
+      gap: 10px;
     }
+
     #questionInput {
       flex: 1;
-      padding: 12px 14px;
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      font-family: inherit;
-      font-size: .9rem;
-      resize: none;
-      min-height: 48px;
-      max-height: 140px;
+      background: transparent;
+      border: none;
       outline: none;
-      transition: border-color .2s;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.92rem;
+      resize: none;
+      min-height: 24px;
+      max-height: 120px;
       line-height: 1.5;
-      color: var(--text);
-      background: var(--surface);
     }
-    #questionInput:focus { border-color: var(--primary); }
-    #questionInput::placeholder { color: #aaa; }
-    #questionInput:disabled { background: var(--surface-2); cursor: not-allowed; }
+    #questionInput::placeholder { color: var(--text-muted); }
 
-    #sendBtn {
-      width: 48px; height: 48px;
-      border: 1.5px solid var(--primary);
-      background: var(--primary);
-      color: #fff;
-      border-radius: var(--radius);
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-      transition: background .2s, transform .1s;
+    .input-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       flex-shrink: 0;
     }
-    #sendBtn:hover:not(:disabled) { background: var(--primary-hover); transform: scale(1.04); }
-    #sendBtn:disabled { background: #ccc; border-color: #ccc; cursor: not-allowed; transform: none; }
 
-    .input-hint {
-      font-size: .72rem;
-      color: #aaa;
-      margin-top: 6px;
-      display: flex;
-      justify-content: space-between;
+    .btn-clear-input {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 50%;
+      display: none;
+      align-items: center;
+      justify-content: center;
     }
-    #charCount { color: #bbb; }
-    #charCount.warn { color: #e07b00; }
-    #charCount.over { color: #c00; font-weight: 600; }
+    .btn-clear-input:hover { color: var(--text-main); }
 
-    /* ── Responsive ── */
-    @media (max-width: 600px) {
-      .app { max-width: 100%; box-shadow: none; }
-      .header { padding: 14px 16px; }
-      .bubble { font-size: .875rem; }
+    #sendBtn {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      background: var(--primary-gradient);
+      border: none;
+      color: #000;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition-fast);
+      box-shadow: 0 2px 10px rgba(245, 184, 0, 0.3);
+    }
+    #sendBtn:hover:not(:disabled) { transform: scale(1.06); }
+    #sendBtn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .input-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      padding: 0 4px;
+    }
+
+    #charCounter {
+      transition: var(--transition-fast);
+    }
+    #charCounter.warn { color: #f59e0b; }
+    #charCounter.over { color: #ef4444; font-weight: 700; }
+
+    /* Toast Notification */
+    .toast-container {
+      position: fixed;
+      bottom: 90px;
+      right: 24px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      background: var(--surface-card);
+      backdrop-filter: var(--backdrop-blur);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-size: 0.82rem;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: fadeSlideUp 0.3s ease-out;
+    }
+
+    /* Keyframes */
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        box-shadow: var(--shadow-sm);
+      }
+      .sidebar.closed { transform: translateX(-100%); margin-left: 0; }
+      .hero-cards-grid { grid-template-columns: 1fr; }
+      .message-row { max-width: 94%; }
     }
   </style>
 </head>
 <body>
-  <div class="app">
 
-    <header class="header">
-      <div class="header-icon">
-        <img src="/Logo.png" alt="Logo OSUI Mahawaditra" />
-      </div>
-      <div>
-        <div class="header-title">Chatbot OSUI Mahawaditra</div>
-        <div class="header-subtitle">Asisten AD/ART &amp; SOP Organisasi</div>
-      </div>
-      <div class="status-dot" title="Online"></div>
-    </header>
+  <!-- Ambient Glow Effect -->
+  <div class="ambient-glow"></div>
 
-    <main class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="Percakapan">
-      <div class="welcome" id="welcomeMsg">
-        <div class="welcome-icon">📋</div>
-        <h2>Halo, Mahawaditra! 👋</h2>
-        <p>Tanyakan apa saja seputar AD/ART atau SOP divisi organisasi kita.</p>
-        <div class="suggestion-chips">
-          <button class="chip" onclick="sendSuggestion(this)">Berapa masa jabatan ketua?</button>
-          <button class="chip" onclick="sendSuggestion(this)">Apa syarat menjadi anggota aktif?</button>
-          <button class="chip" onclick="sendSuggestion(this)">Bagaimana prosedur pengajuan dana?</button>
-          <button class="chip" onclick="sendSuggestion(this)">Apa tugas divisi PSDM?</button>
+  <!-- App Wrapper -->
+  <div class="app-wrapper">
+
+    <!-- Mobile Backdrop -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
+
+    <!-- Sidebar Drawer -->
+    <aside class="sidebar closed" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-brand">
+          <img src="/static/logo.png" alt="Logo OSUI" />
+          <div class="sidebar-brand-text">OSUI Mahawaditra</div>
         </div>
-      </div>
-    </main>
-
-    <footer class="input-area">
-      <div class="input-row">
-        <textarea
-          id="questionInput"
-          placeholder="Ketik pertanyaan tentang AD/ART atau SOP..."
-          rows="1"
-          aria-label="Pertanyaan"
-        ></textarea>
-        <button id="sendBtn" onclick="sendMessage()" aria-label="Kirim pertanyaan">
-          ➤
+        <button class="btn-close-sidebar" onclick="toggleSidebar()" aria-label="Tutup Sidebar">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <p class="input-hint">
-        <span>Enter untuk kirim &middot; Shift+Enter baris baru</span>
-        <span id="charCount">0 / 500</span>
-      </p>
-    </footer>
+
+      <div class="sidebar-content">
+
+        <!-- Nav Chat Mode Button -->
+        <button class="btn-nav-chat active" id="btnNavChat" onclick="switchToChatView()">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          <span>Chatbot Asisten</span>
+        </button>
+
+        <!-- Search Box -->
+        <div class="sidebar-search">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="sidebarSearchInput" placeholder="Cari dokumen PDF..." oninput="filterSidebarDocs()" />
+        </div>
+
+        <!-- PDF Document List -->
+        <div>
+          <div class="sidebar-section-title">Dokumen Organisasi (10 Dokumen)</div>
+          <div class="doc-list" id="docList">
+
+            <div class="doc-item" onclick="openPdfDocument('ADART-OSUIMahawaditra-2022.pdf', 'AD/ART OSUI Mahawaditra 2022', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">AD/ART OSUI Mahawaditra 2022</span>
+                <span class="doc-item-sub">Anggaran Dasar &amp; Rumah Tangga</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-PengurusInti-Keuangan-2026.pdf', 'SOP Keuangan 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Keuangan 2026</span>
+                <span class="doc-item-sub">Pengurus Inti</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-PengurusInti-Kesekretariatan-2026.pdf', 'SOP Kesekretariatan 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Kesekretariatan 2026</span>
+                <span class="doc-item-sub">Pengurus Inti</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-PengurusInti-Keanggotaan-2026.pdf', 'SOP Keanggotaan 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Keanggotaan 2026</span>
+                <span class="doc-item-sub">Pengurus Inti</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-Divisi-PSDM-2026.pdf', 'SOP Divisi PSDM 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Divisi PSDM 2026</span>
+                <span class="doc-item-sub">Divisi</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-Divisi-Latihan-2026.pdf', 'SOP Divisi Latihan 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Divisi Latihan 2026</span>
+                <span class="doc-item-sub">Divisi</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-Divisi-Logistik-2026.pdf', 'SOP Divisi Logistik 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Divisi Logistik 2026</span>
+                <span class="doc-item-sub">Divisi</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-Divisi-Acara-2026.pdf', 'SOP Divisi Acara 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Divisi Acara 2026</span>
+                <span class="doc-item-sub">Divisi</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-Divisi-HPDD-2026.pdf', 'SOP Divisi HPDD 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Divisi HPDD 2026</span>
+                <span class="doc-item-sub">Divisi</span>
+              </div>
+            </div>
+
+            <div class="doc-item" onclick="openPdfDocument('SOP-Divisi-Bibliografi-2026.pdf', 'SOP Divisi Bibliografi 2026', this)">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <div class="doc-item-info">
+                <span class="doc-item-title">SOP Divisi Bibliografi 2026</span>
+                <span class="doc-item-sub">Divisi</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-chat">
+
+      <!-- Header -->
+      <header class="chat-header">
+        <div class="header-left">
+          <button class="btn-header-icon" onclick="toggleSidebar()" aria-label="Buka Sidebar Menu" title="Buka Sidebar Dokumen">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          
+          <div class="header-brand">
+            <div class="header-logo-container">
+              <img src="/static/logo.png" alt="Logo OSUI Mahawaditra" />
+            </div>
+            <div class="header-info">
+              <div class="brand-title" id="headerTitleText">
+                OSUI Mahawaditra
+              </div>
+              <div class="brand-subtitle" id="headerSubtitleText">
+                <span class="status-dot-active"></span>
+                Asisten Resmi AD/ART &amp; SOP
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button class="btn-header-icon" onclick="clearChatHistory()" title="Bersihkan Chat" id="btnHeaderClear">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+
+          <button class="btn-header-icon" onclick="toggleTheme()" id="themeBtn" title="Ganti Tema (Gelap/Terang)">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- View Container (Chatbot Mode or PDF Viewer Mode) -->
+      <div class="view-container">
+
+        <!-- 1. CHATBOT STREAM VIEW -->
+        <div class="chat-stream" id="chatStream" role="log" aria-live="polite">
+
+          <!-- Welcome Hero Banner (Initial Chat Session) -->
+          <div class="welcome-hero" id="welcomeHero">
+            <div class="hero-icon-wrapper">
+              <img src="/static/logo.png" alt="OSUI Mahawaditra" />
+            </div>
+            <h2>Halo, Mahawaditra! 👋</h2>
+            <p>Tanyakan apa saja seputar peraturan organisasi AD/ART dan SOP divisi OSUI Mahawaditra.</p>
+
+            <div class="hero-cards-grid">
+              <div class="hero-card" onclick="sendCustomPrompt('Berapa denda jika terlambat membayar kas atau iuran keuangan?')">
+                <div class="hero-card-header">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  Denda Keuangan
+                </div>
+                <div class="hero-card-title">Berapa denda jika terlambat membayar kas atau iuran keuangan?</div>
+              </div>
+
+              <div class="hero-card" onclick="sendCustomPrompt('Bagaimana sanksi atau denda jika terlambat atau tidak hadir latihan?')">
+                <div class="hero-card-header">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  Denda &amp; Sanksi Latihan
+                </div>
+                <div class="hero-card-title">Bagaimana sanksi atau denda jika terlambat atau tidak hadir latihan?</div>
+              </div>
+
+              <div class="hero-card" onclick="sendCustomPrompt('Berapa masa jabatan ketua umum OSUI Mahawaditra dalam AD/ART?')">
+                <div class="hero-card-header">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  Kepengurusan AD/ART
+                </div>
+                <div class="hero-card-title">Berapa masa jabatan ketua umum OSUI Mahawaditra dalam AD/ART?</div>
+              </div>
+
+              <div class="hero-card" onclick="sendCustomPrompt('Bagaimana syarat dan prosedur peminjaman alat musik dari logistik?')">
+                <div class="hero-card-header">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12 0c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+                  Peminjaman Alat Logistik
+                </div>
+                <div class="hero-card-title">Bagaimana syarat dan prosedur peminjaman alat musik dari logistik?</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 2. PDF VIEWER MODE -->
+        <div class="pdf-viewer-container" id="pdfViewerMode">
+          <div class="pdf-viewer-bar">
+            <div class="pdf-viewer-title" id="pdfViewerTitle">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <span id="pdfFileNameText">Nama Dokumen.pdf</span>
+            </div>
+            <div class="pdf-viewer-actions">
+              <button class="btn-pdf-action" onclick="switchToChatView()">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                Kembali ke Chat
+              </button>
+              <a href="#" target="_blank" class="btn-pdf-action" id="btnPdfOpenNewTab">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                Tab Baru
+              </a>
+            </div>
+          </div>
+          <iframe id="pdfIframe" class="pdf-iframe" src="about:blank"></iframe>
+        </div>
+
+      </div>
+
+      <!-- Input Dock (Chatbot View Only) -->
+      <div class="input-dock-container" id="inputDockContainer">
+        <div class="input-dock">
+          <div class="input-row">
+            <textarea
+              id="questionInput"
+              placeholder="Ketik pertanyaan tentang AD/ART atau SOP..."
+              rows="1"
+              aria-label="Ketik Pertanyaan"
+            ></textarea>
+
+            <div class="input-controls">
+              <button class="btn-clear-input" id="btnClearInput" onclick="clearInput()" title="Hapus Teks">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+
+              <button id="sendBtn" onclick="sendMessage()" aria-label="Kirim Pertanyaan">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="input-meta">
+            <span id="charCounter">0 / 500</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
 
   </div>
 
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- JavaScript -->
   <script>
-    // Konfigurasi marked.js
+    // Marked configuration
     marked.setOptions({ breaks: true, gfm: true });
 
-    const chatArea    = document.getElementById('chatArea');
-    const inputEl     = document.getElementById('questionInput');
-    const sendBtn     = document.getElementById('sendBtn');
-    const welcomeMsg  = document.getElementById('welcomeMsg');
-    const charCount   = document.getElementById('charCount');
-    const TIMEOUT_MS  = 30_000;
-    const MAX_HISTORY = 3;
-    const MAX_CHARS   = 500;
+    // DOM Elements
+    const chatStream         = document.getElementById('chatStream');
+    const inputEl            = document.getElementById('questionInput');
+    const sendBtn            = document.getElementById('sendBtn');
+    const btnClearInput      = document.getElementById('btnClearInput');
+    const charCounter        = document.getElementById('charCounter');
+    const welcomeHero        = document.getElementById('welcomeHero');
+    const sidebar            = document.getElementById('sidebar');
+    const sidebarBackdrop    = document.getElementById('sidebarBackdrop');
 
-    // Riwayat percakapan [{role: "user"|"bot", content: "..."}]
+    const pdfViewerMode      = document.getElementById('pdfViewerMode');
+    const pdfIframe          = document.getElementById('pdfIframe');
+    const pdfFileNameText    = document.getElementById('pdfFileNameText');
+    const btnPdfOpenNewTab   = document.getElementById('btnPdfOpenNewTab');
+    const inputDockContainer = document.getElementById('inputDockContainer');
+    const btnNavChat         = document.getElementById('btnNavChat');
+    const btnHeaderClear     = document.getElementById('btnHeaderClear');
+
+    const MAX_CHARS   = 500;
+    const MAX_HISTORY = 3;
     let conversationHistory = [];
 
-    // Auto-resize textarea + char counter
+    // Auto-resize Textarea & Char Counter
     inputEl.addEventListener('input', () => {
       inputEl.style.height = 'auto';
-      inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+      
       const len = inputEl.value.length;
-      charCount.textContent = `${len} / ${MAX_CHARS}`;
-      charCount.className = len > MAX_CHARS ? 'over' : len > MAX_CHARS * 0.8 ? 'warn' : '';
-      sendBtn.disabled = len > MAX_CHARS;
+      charCounter.textContent = `${len} / ${MAX_CHARS}`;
+      
+      if (len > MAX_CHARS) {
+        charCounter.className = 'over';
+        sendBtn.disabled = true;
+      } else if (len > MAX_CHARS * 0.8) {
+        charCounter.className = 'warn';
+        sendBtn.disabled = false;
+      } else {
+        charCounter.className = '';
+        sendBtn.disabled = false;
+      }
+
+      btnClearInput.style.display = len > 0 ? 'flex' : 'none';
     });
 
     inputEl.addEventListener('keydown', (e) => {
@@ -371,42 +1292,148 @@
       }
     });
 
-    function sendSuggestion(btn) {
-      inputEl.value = btn.textContent;
+    function clearInput() {
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      charCounter.textContent = `0 / ${MAX_CHARS}`;
+      charCounter.className = '';
+      sendBtn.disabled = false;
+      btnClearInput.style.display = 'none';
+      inputEl.focus();
+    }
+
+    function sendCustomPrompt(text) {
+      inputEl.value = text;
+      inputEl.dispatchEvent(new Event('input'));
+      if (window.innerWidth <= 768 && !sidebar.classList.contains('closed')) {
+        toggleSidebar();
+      }
       sendMessage();
     }
 
-    function setLoading(isLoading) {
-      inputEl.disabled = isLoading;
-      sendBtn.disabled = isLoading;
+    // Toggle Theme (Dark / Light)
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme');
+      const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', nextTheme);
+      showToast(`Tema diganti ke ${nextTheme === 'dark' ? 'Gelap 🌙' : 'Terang ☀️'}`);
+    }
+
+    // Toggle Sidebar
+    function toggleSidebar() {
+      sidebar.classList.toggle('closed');
+      const isOpen = !sidebar.classList.contains('closed');
+      if (window.innerWidth <= 768) {
+        sidebarBackdrop.classList.toggle('active', isOpen);
+      }
+    }
+
+    // Sidebar PDF Document Search Filter
+    function filterSidebarDocs() {
+      const query = document.getElementById('sidebarSearchInput').value.toLowerCase().trim();
+      const items = document.querySelectorAll('#docList .doc-item');
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(query) ? 'flex' : 'none';
+      });
+    }
+
+    // Switch View to PDF Document Viewer
+    function openPdfDocument(filename, label, element, page) {
+      document.querySelectorAll('#docList .doc-item').forEach(el => el.classList.remove('active'));
+      if (element) element.classList.add('active');
+      btnNavChat.classList.remove('active');
+
+      const pdfUrl = `/dokumen/${filename}` + (page ? `#page=${page}` : '');
+      // Paksa reload meski hanya fragment #page yang berubah (mis. buka halaman lain dari file yang sama)
+      pdfIframe.src = 'about:blank';
+      pdfIframe.src = pdfUrl;
+      pdfFileNameText.textContent = label || filename;
+      btnPdfOpenNewTab.href = pdfUrl;
+
+      chatStream.style.display = 'none';
+      inputDockContainer.style.display = 'none';
+      btnHeaderClear.style.display = 'none';
+      pdfViewerMode.classList.add('active');
+
+      if (window.innerWidth <= 768 && !sidebar.classList.contains('closed')) {
+        toggleSidebar();
+      }
+      showToast(`Membuka ${label || filename}`);
+    }
+
+    // Switch View back to Chatbot Asisten
+    function switchToChatView() {
+      document.querySelectorAll('#docList .doc-item').forEach(el => el.classList.remove('active'));
+      btnNavChat.classList.add('active');
+
+      pdfViewerMode.classList.remove('active');
+      pdfIframe.src = 'about:blank';
+
+      chatStream.style.display = 'flex';
+      inputDockContainer.style.display = 'block';
+      btnHeaderClear.style.display = 'flex';
+
+      if (window.innerWidth <= 768 && !sidebar.classList.contains('closed')) {
+        toggleSidebar();
+      }
+    }
+
+    // Toast Notification
+    function showToast(message) {
+      const toastContainer = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.innerHTML = `<span>✨</span> <span>${message}</span>`;
+      toastContainer.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 300);
+      }, 2500);
+    }
+
+    // Clear Chat History
+    function clearChatHistory() {
+      conversationHistory = [];
+      chatStream.innerHTML = '';
+      chatStream.appendChild(welcomeHero);
+      welcomeHero.style.display = 'flex';
+      showToast('Riwayat percakapan telah dibersihkan.');
+    }
+
+    function removeWelcomeHero() {
+      if (welcomeHero && welcomeHero.parentNode) {
+        welcomeHero.style.display = 'none';
+      }
     }
 
     function scrollToBottom() {
-      chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' });
+      chatStream.scrollTo({ top: chatStream.scrollHeight, behavior: 'smooth' });
     }
 
-    function removeWelcome() {
-      if (welcomeMsg && welcomeMsg.parentNode) welcomeMsg.remove();
-    }
-
+    // Append Message to Stream
     function appendMessage(role, contentText, sources = [], isMarkdown = false) {
-      removeWelcome();
+      switchToChatView();
+      removeWelcomeHero();
 
-      const wrap = document.createElement('div');
-      wrap.className = `message ${role}`;
-      if (role === 'bot' && contentText.startsWith('\u26a0\ufe0f')) wrap.classList.add('error');
+      const row = document.createElement('div');
+      row.className = `message-row ${role}`;
+      if (role === 'bot' && contentText.startsWith('⚠️')) row.classList.add('error');
 
       const avatar = document.createElement('div');
       avatar.className = 'avatar';
       if (role === 'bot') {
-        const avatarImg = document.createElement('img');
-        avatarImg.src = '/Logo.png';
-        avatarImg.alt = 'Bot OSUI';
-        avatar.appendChild(avatarImg);
+        const img = document.createElement('img');
+        img.src = '/static/logo.png';
+        img.alt = 'OSUI';
+        avatar.appendChild(img);
       } else {
         avatar.textContent = '👤';
-        avatar.style.cssText = 'background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;';
       }
+
+      const bubbleWrapper = document.createElement('div');
+      bubbleWrapper.className = 'bubble-wrapper';
 
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
@@ -415,134 +1442,168 @@
       inner.className = 'bubble-content';
 
       if (isMarkdown && role === 'bot') {
-        // Render markdown untuk pesan bot
         inner.innerHTML = marked.parse(contentText);
       } else {
         inner.textContent = contentText;
       }
       bubble.appendChild(inner);
 
-      // Sumber dokumen
-      if (sources.length > 0) {
-        const srcDiv = document.createElement('div');
-        srcDiv.className = 'sources';
-        srcDiv.innerHTML = `<div class="sources-label">📚 Sumber Dokumen</div>`;
-        sources.forEach(s => {
-          const item = document.createElement('div');
-          item.className = 'source-item';
-          item.textContent = `${s.file} — Halaman ${s.page}`;
-          srcDiv.appendChild(item);
+      // Sources Accordion (Bot only)
+      if (role === 'bot' && sources && sources.length > 0) {
+        const accordion = document.createElement('div');
+        accordion.className = 'sources-accordion';
+
+        const accHeader = document.createElement('div');
+        accHeader.className = 'sources-header';
+        accHeader.innerHTML = `
+          <div class="sources-header-title">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+            <span>Sumber Dokumen Rujukan (${sources.length})</span>
+          </div>
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+        `;
+
+        const accBody = document.createElement('div');
+        accBody.className = 'sources-body';
+
+        sources.forEach(src => {
+          const chip = document.createElement('div');
+          chip.className = 'source-chip';
+          chip.innerHTML = `📄 <strong>${src.file}</strong> &bull; Hal. ${src.page}`;
+          chip.onclick = () => openPdfDocument(src.file, src.file, null, src.page);
+          accBody.appendChild(chip);
         });
-        bubble.appendChild(srcDiv);
+
+        accHeader.onclick = () => {
+          const isHidden = accBody.style.display === 'none';
+          accBody.style.display = isHidden ? 'flex' : 'none';
+        };
+
+        accordion.appendChild(accHeader);
+        accordion.appendChild(accBody);
+        bubble.appendChild(accordion);
       }
 
-      wrap.appendChild(avatar);
-      wrap.appendChild(bubble);
-      chatArea.appendChild(wrap);
+      bubbleWrapper.appendChild(bubble);
+
+      // Bot Message Action Toolbar (Copy Button)
+      if (role === 'bot' && !contentText.startsWith('⚠️')) {
+        const actions = document.createElement('div');
+        actions.className = 'message-actions';
+
+        const btnCopy = document.createElement('button');
+        btnCopy.className = 'btn-action-sm';
+        btnCopy.innerHTML = `<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Salin`;
+        btnCopy.onclick = () => {
+          navigator.clipboard.writeText(contentText);
+          showToast('Jawaban berhasil disalin!');
+        };
+
+        actions.appendChild(btnCopy);
+        bubbleWrapper.appendChild(actions);
+      }
+
+      row.appendChild(avatar);
+      row.appendChild(bubbleWrapper);
+      chatStream.appendChild(row);
       scrollToBottom();
-      return wrap;
+      return row;
     }
 
+    // Loading Indicator Row
     function appendLoading() {
-      removeWelcome();
-      const wrap = document.createElement('div');
-      wrap.className = 'message bot';
-      wrap.id = 'loadingMsg';
+      removeWelcomeHero();
+      const row = document.createElement('div');
+      row.className = 'message-row bot';
+      row.id = 'loadingMsg';
 
       const avatar = document.createElement('div');
       avatar.className = 'avatar';
-      const avatarImg = document.createElement('img');
-      avatarImg.src = '/Logo.png';
-      avatarImg.alt = 'Bot OSUI';
-      avatar.appendChild(avatarImg);
+      const img = document.createElement('img');
+      img.src = '/static/logo.png';
+      img.alt = 'OSUI';
+      avatar.appendChild(img);
 
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
 
-      const dots = document.createElement('div');
-      dots.className = 'loading-dots';
-      dots.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+      const container = document.createElement('div');
+      container.className = 'loading-container';
+      container.innerHTML = `
+        <div class="loading-dots">
+          <div class="loading-dot"></div>
+          <div class="loading-dot"></div>
+          <div class="loading-dot"></div>
+        </div>
+        <span class="loading-text">Memindai dokumen &amp; menyusun jawaban...</span>
+      `;
 
-      const warning = document.createElement('div');
-      warning.className = 'timeout-warning';
-      warning.id = 'timeoutWarning';
-      warning.textContent = '⏳ Permintaan memakan waktu lebih lama. Silakan tunggu atau coba lagi.';
-
-      bubble.appendChild(dots);
-      bubble.appendChild(warning);
-      wrap.appendChild(avatar);
-      wrap.appendChild(bubble);
-      chatArea.appendChild(wrap);
+      bubble.appendChild(container);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      chatStream.appendChild(row);
       scrollToBottom();
     }
 
     function removeLoading() {
-      const el = document.getElementById('loadingMsg');
-      if (el) el.remove();
+      const loader = document.getElementById('loadingMsg');
+      if (loader) loader.remove();
     }
 
+    function setLoadingState(isLoading) {
+      inputEl.disabled = isLoading;
+      sendBtn.disabled = isLoading;
+    }
+
+    // Main Send Message Function
     async function sendMessage() {
       const question = inputEl.value.trim();
       if (!question) return;
 
       appendMessage('user', question, [], false);
-      inputEl.value = '';
-      inputEl.style.height = 'auto';
-
-      setLoading(true);
+      clearInput();
+      setLoadingState(true);
       appendLoading();
 
-      const timeoutId = setTimeout(() => {
-        const w = document.getElementById('timeoutWarning');
-        if (w) w.style.display = 'block';
-        scrollToBottom();
-      }, TIMEOUT_MS);
-
-      // Kirim riwayat 3 chat terakhir (MAX_HISTORY pasang = MAX_HISTORY*2 messages)
       const historyToSend = conversationHistory.slice(-(MAX_HISTORY * 2));
 
       try {
         const controller = new AbortController();
-        const hardTimeout = setTimeout(() => controller.abort(), 60_000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-        const res = await fetch('/api/chat', {
+        const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: question, history: historyToSend }),
-          signal: controller.signal,
+          signal: controller.signal
         });
 
-        clearTimeout(hardTimeout);
         clearTimeout(timeoutId);
         removeLoading();
 
-        const data = await res.json();
+        const data = await response.json();
 
-        if (!res.ok || !data.answer) {
-          appendMessage('bot', '⚠️ ' + (data.answer || 'Terjadi kesalahan. Silakan coba lagi.'), [], false);
+        if (!response.ok || !data.answer) {
+          appendMessage('bot', '⚠️ ' + (data.answer || 'Terjadi kesalahan sistem. Silakan coba beberapa saat lagi.'), [], false);
         } else {
           appendMessage('bot', data.answer, data.sources || [], true);
 
-          // Simpan ke riwayat percakapan
           conversationHistory.push({ role: 'user', content: question });
           conversationHistory.push({ role: 'bot', content: data.answer });
 
-          // Batasi riwayat agar tidak terlalu panjang (simpan MAX_HISTORY*2 messages)
           if (conversationHistory.length > MAX_HISTORY * 2 * 2) {
             conversationHistory = conversationHistory.slice(-(MAX_HISTORY * 2));
           }
         }
-
       } catch (err) {
-        clearTimeout(timeoutId);
         removeLoading();
         if (err.name === 'AbortError') {
-          appendMessage('bot', '⚠️ Permintaan habis waktu. Silakan coba lagi.', [], false);
+          appendMessage('bot', '⚠️ Waktu permintaan habis (timeout). Silakan coba lagi.', [], false);
         } else {
-          appendMessage('bot', '⚠️ Tidak dapat terhubung ke server. Periksa koneksi internet Anda.', [], false);
+          appendMessage('bot', '⚠️ Gagal terhubung ke server. Periksa koneksi internet Anda.', [], false);
         }
       } finally {
-        setLoading(false);
+        setLoadingState(false);
         inputEl.focus();
       }
     }

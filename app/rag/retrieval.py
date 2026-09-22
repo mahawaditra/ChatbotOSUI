@@ -16,6 +16,8 @@ from app.config import (
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSION,
     TOP_K,
+    RETRIEVAL_FETCH_K,
+    SIMILARITY_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,11 +58,14 @@ def retrieve_context(question: str) -> list[dict[str, Any]]:
     response.raise_for_status()
     question_vector = response.json()["embedding"]["values"]
 
-    # Query Upstash Vector
+    # Query Upstash Vector. Minta RETRIEVAL_FETCH_K kandidat (bukan langsung TOP_K) —
+    # approximate nearest-neighbor search Upstash pada corpus ini terbukti tidak reliable
+    # menemukan hasil ter-relevan kalau top_k yang diminta terlalu kecil (lihat komentar
+    # RETRIEVAL_FETCH_K di config.py). Dipangkas ke TOP_K di bawah, setelah difilter skor.
     index = get_vector_index()
     results = index.query(
         vector=question_vector,
-        top_k=TOP_K,
+        top_k=RETRIEVAL_FETCH_K,
         include_metadata=True,
     )
 
@@ -68,9 +73,20 @@ def retrieve_context(question: str) -> list[dict[str, Any]]:
         logger.warning("Tidak ada hasil retrieval dari Upstash. Database mungkin kosong.")
         return []
 
+    # Buang hasil yang skor similarity-nya di bawah threshold (kemungkinan tidak relevan),
+    # lalu ambil TOP_K teratas saja untuk masuk ke prompt LLM
+    relevant_results = [r for r in results if r.score >= SIMILARITY_THRESHOLD][:TOP_K]
+    if not relevant_results:
+        top_score = max((r.score for r in results), default=0.0)
+        logger.warning(
+            f"Semua {len(results)} hasil retrieval di bawah SIMILARITY_THRESHOLD={SIMILARITY_THRESHOLD} "
+            f"(skor tertinggi: {top_score:.3f}). Kemungkinan pertanyaan di luar topik dokumen."
+        )
+        return []
+
     # Format hasil
     context_chunks = []
-    for result in results:
+    for result in relevant_results:
         metadata = result.metadata or {}
         context_chunks.append(
             {

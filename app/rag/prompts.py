@@ -49,3 +49,36 @@ def build_prompt(context: str, question: str, history: list[dict] | None = None)
 </pertanyaan_user>
 
 Jawab pertanyaan di atas berdasarkan konteks dokumen yang tersedia:"""
+
+
+def build_rewrite_prompt(question: str, history: list[dict]) -> str:
+    """
+    Membangun prompt singkat untuk mengubah pertanyaan lanjutan (yang mungkin
+    mengandalkan konteks percakapan sebelumnya, mis. "terus kalau telat gimana?")
+    menjadi satu pertanyaan mandiri (standalone) yang lengkap untuk keperluan retrieval.
+
+    Args:
+        question: Pertanyaan terbaru dari user
+        history: Riwayat percakapan [{role: "user"|"bot", content: "..."}] (sudah dipotong
+                 oleh caller ke beberapa turn terakhir saja)
+
+    Returns:
+        String prompt yang siap dikirim ke LLM, output-nya hanya berupa satu pertanyaan
+    """
+    lines = []
+    for h in history:
+        label = "User" if h["role"] == "user" else "Asisten"
+        lines.append(f"{label}: {h['content']}")
+    history_text = "\n".join(lines)
+
+    return f"""Berdasarkan riwayat percakapan berikut, ubah PERTANYAAN TERBARU menjadi satu \
+pertanyaan mandiri (standalone) dalam Bahasa Indonesia yang lengkap tanpa perlu membaca riwayat.
+Jika PERTANYAAN TERBARU sudah mandiri, kembalikan apa adanya.
+Jangan menjawab pertanyaannya. Tulis HANYA pertanyaan hasil ubahan, tanpa penjelasan tambahan.
+
+RIWAYAT PERCAKAPAN:
+{history_text}
+
+PERTANYAAN TERBARU: {question}
+
+PERTANYAAN MANDIRI:"""

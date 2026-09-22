@@ -30,7 +30,30 @@ DOKUMEN_DIR: Path = Path(__file__).parent.parent / "dokumen"
 # --- RAG settings ---
 CHUNK_SIZE: int = 1000
 CHUNK_OVERLAP: int = 200
-TOP_K: int = 5  # jumlah chunks yang diambil saat retrieval
+
+# Batas ukuran khusus untuk chunking sadar-Pasal (lihat indexing.py::_split_pasal_aware).
+# Satu Pasal adalah satu unit semantik utuh, jadi bolehnya lebih longgar dari CHUNK_SIZE
+# biasa — dipilih 2000 karena Pasal terpanjang di ADART-OSUIMahawaditra-2022.pdf ~1874
+# karakter. Nilai ini WAJIB lebih besar dari Pasal terpanjang di dokumen, kalau tidak
+# satu Pasal bisa kepotong lagi di tengah kalimat (pernah kejadian: klausa "2/3 dari
+# jumlah Badan Pengurus" di Pasal 31 terpotong jadi "2/3 dari jumlah" saja waktu masih
+# pakai CHUNK_SIZE=1000, bikin LLM menebak sendiri kata sambungannya dan salah kutip).
+PASAL_CHUNK_SIZE: int = 2000
+
+TOP_K: int = 5  # jumlah chunk maksimum yang akhirnya masuk ke prompt LLM
+
+# Jumlah kandidat yang diminta ke Upstash SEBELUM dipangkas ke TOP_K.
+# WAJIB lebih besar dari TOP_K: diverifikasi empiris bahwa approximate nearest-neighbor
+# search Upstash pada corpus ini (skor antar chunk sangat rapat, ~0.75-0.81) baru stabil
+# menemukan hasil #1 yang benar mulai top_k>=20 — top_k=5/10 langsung ke Upstash bisa
+# melewatkan chunk paling relevan sama sekali. Filter SIMILARITY_THRESHOLD & pemangkasan
+# ke TOP_K dilakukan setelah fetch ini, di retrieval.py.
+RETRIEVAL_FETCH_K: int = 25
+
+# Skor similarity minimum (dari Upstash) agar sebuah chunk dianggap relevan.
+# Nilai awal, perlu dikalibrasi berdasarkan skor asli di log produksi —
+# metrik similarity tergantung setting index Upstash (dibuat via dashboard, bukan di kode ini).
+SIMILARITY_THRESHOLD: float = 0.5
 
 # --- LLM settings ---
 LLM_MODEL: str = "gemini-3.1-flash-lite"

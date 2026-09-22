@@ -42,9 +42,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Serve static files (index.html)
+# Serve static files (index.html & dokumen PDF)
 STATIC_DIR = Path(__file__).parent / "static"
+DOKUMEN_DIR = Path(__file__).parent.parent / "dokumen"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+if DOKUMEN_DIR.exists():
+    app.mount("/dokumen", StaticFiles(directory=str(DOKUMEN_DIR)), name="dokumen")
 
 # Batas panjang input
 MAX_QUESTION_LENGTH = 500
@@ -91,11 +94,21 @@ class ChatResponse(BaseModel):
 
 
 # --- Helper: log request ---
-def _log_request(question: str, answer: str, sources: list, latency_ms: float, status: str) -> None:
+def _log_request(
+    question: str,
+    answer: str,
+    sources: list,
+    latency_ms: float,
+    status: str,
+    retrieval_query: str = "",
+) -> None:
     """Menyimpan log request ke file JSON harian."""
     log_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "question": question,
+        # Query standalone hasil query rewriting yang dipakai untuk retrieval — berguna untuk
+        # mengecek manual apakah rewrite membantu pertanyaan lanjutan di percakapan multi-turn.
+        "retrieval_query": retrieval_query,
         "answer_preview": answer[:100] + "..." if len(answer) > 100 else answer,
         "sources": [f"{s['file']} hal. {s['page']}" for s in sources],
         "chunks_retrieved": len(sources),
@@ -183,6 +196,7 @@ async def chat(request: ChatRequest):
             sources=locals().get("sources", []),
             latency_ms=latency_ms,
             status=status,
+            retrieval_query=locals().get("result", {}).get("retrieval_query", ""),
         )
 
 

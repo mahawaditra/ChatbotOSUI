@@ -11,23 +11,44 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Google AI Studio ---
+# Satu-satunya secret yang benar-benar dibutuhkan untuk indexing (dipakai baik oleh server
+# maupun scripts/reindex.py) — satu-satunya yang tetap WAJIB (os.environ[...]) di sini.
 GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]
 
 # --- Upstash Redis (dipakai khusus untuk rate limiting /api/chat — database terpisah
 # dari vector store lokal di bawah, buat database Redis baru di dashboard Upstash) ---
-UPSTASH_REDIS_REST_URL: str = os.environ["UPSTASH_REDIS_REST_URL"]
-UPSTASH_REDIS_REST_TOKEN: str = os.environ["UPSTASH_REDIS_REST_TOKEN"]
+# Dibaca dengan default kosong (BUKAN os.environ[...] wajib) supaya mengimpor modul ini
+# secara transitif (mis. scripts/reindex.py -> app.rag.indexing -> app.config) tidak ikut
+# memaksa secret produksi yang tidak dipakai reindex tersedia di mesin manapun yang
+# menjalankannya. Wajib-nya ditegakkan oleh validate_server_config() di bawah, dipanggil
+# app/main.py saat startup server sungguhan — bukan di sini.
+UPSTASH_REDIS_REST_URL: str = os.getenv("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_REDIS_REST_TOKEN: str = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 
 # --- Admin ---
-ADMIN_KEY: str = os.environ["ADMIN_KEY"]
-# Minimal 32 karakter (generator resmi di README/CLAUDE.md pakai secrets.token_hex(32) -> 64 hex
-# char) — mencegah ADMIN_KEY kosong/lemah lolos begitu saja tanpa ketahuan sampai ada yang coba
-# bypass /admin/reindex dengan header X-Admin-Key kosong.
-if len(ADMIN_KEY) < 32:
-    raise RuntimeError(
-        "ADMIN_KEY terlalu pendek atau kosong (minimal 32 karakter). "
-        "Generate dengan: python -c \"import secrets; print(secrets.token_hex(32))\""
-    )
+# Sama seperti di atas: default kosong di sini, panjang ≥32 karakter ditegakkan oleh
+# validate_server_config(), bukan langsung saat modul ini di-import.
+ADMIN_KEY: str = os.getenv("ADMIN_KEY", "")
+
+
+def validate_server_config() -> None:
+    """
+    Menegakkan secret yang dibutuhkan server sungguhan (dipanggil app/main.py saat startup)
+    tapi TIDAK dibutuhkan alur reindex-only (scripts/reindex.py, yang hanya perlu
+    GEMINI_API_KEY di atas). Dipisah dari deklarasi module-level supaya mengimpor
+    app.config lewat app.rag.indexing tidak transitif memaksa nilai-nilai ini tersedia.
+    """
+    if len(ADMIN_KEY) < 32:
+        raise RuntimeError(
+            "ADMIN_KEY terlalu pendek atau kosong (minimal 32 karakter). "
+            "Generate dengan: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        raise RuntimeError(
+            "UPSTASH_REDIS_REST_URL dan UPSTASH_REDIS_REST_TOKEN wajib diisi (dipakai untuk "
+            "rate limiting /api/chat) — buat database Redis terpisah di "
+            "https://console.upstash.com/redis"
+        )
 
 # --- Path folder dokumen PDF ---
 # Di container Docker, dokumen/ ada di root project (/app/dokumen)
@@ -72,8 +93,12 @@ SIMILARITY_THRESHOLD: float = 0.5
 LLM_MODEL: str = "gemini-3.1-flash-lite"
 EMBEDDING_MODEL: str = "gemini-embedding-001"
 # Ukuran vektor embedding — JANGAN diubah tanpa reindex ulang total (data/vector_store/).
-# Vector store lokal tidak memvalidasi kecocokan dimensi antara vektor tersimpan dan query
-# baru; mismatch akan menghasilkan cosine similarity yang tidak berarti, bukan error.
+# Kalau ini diubah tanpa reindex, numpy langsung raise ValueError saat perkalian matriks di
+# vector_store.py::query() (dimensi tidak cocok) — bukan silently salah, request itu gagal
+# bersih dengan 503. Yang TIDAK terdeteksi otomatis: mengganti EMBEDDING_MODEL ke model lain
+# yang kebetulan berdimensi sama — itu tidak crash, tapi vector_store.py::_load() menolak
+# melayani query (bukan "informasi tidak ditemukan" yang salah kaprah) kalau manifest.json
+# mencatat model berbeda dari yang sekarang dikonfigurasi di sini.
 EMBEDDING_DIMENSION: int = 1536
 
 # --- Batas input & rate limiting /api/chat ---

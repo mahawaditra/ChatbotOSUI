@@ -52,6 +52,7 @@ def get_answer(question: str, history: list[dict] | None = None) -> dict[str, An
             "answer": NO_CONTEXT_MESSAGE,
             "sources": [],
             "retrieval_query": retrieval_query,
+            "status": "ok",
         }
 
     # 3. Bangun context string dari chunks
@@ -67,7 +68,7 @@ def get_answer(question: str, history: list[dict] | None = None) -> dict[str, An
     prompt = build_prompt(context=context, question=question, history=history)
 
     # 5. Panggil Gemini LLM dengan retry 1x jika rate limit
-    answer_text = _call_llm_with_retry(prompt)
+    answer_text, llm_status = _call_llm_with_retry(prompt)
 
     # 6. Format sources (deduplikasi file+page yang sama)
     seen = set()
@@ -82,6 +83,7 @@ def get_answer(question: str, history: list[dict] | None = None) -> dict[str, An
         "answer": answer_text,
         "sources": sources,
         "retrieval_query": retrieval_query,
+        "status": llm_status,
     }
 
 
@@ -124,7 +126,7 @@ def _rewrite_query_for_retrieval(question: str, history: list[dict] | None) -> s
         return question
 
 
-def _call_llm_with_retry(prompt: str) -> str:
+def _call_llm_with_retry(prompt: str) -> tuple[str, str]:
     """
     Memanggil Gemini LLM dengan 1x retry jika terjadi rate limit (429).
 
@@ -132,7 +134,10 @@ def _call_llm_with_retry(prompt: str) -> str:
         prompt: Prompt lengkap yang sudah mengandung konteks dan pertanyaan
 
     Returns:
-        Teks jawaban dari LLM
+        Tuple (teks_jawaban, status) — status adalah "ok" atau "rate_limited". Dipakai
+        sebagai field eksplisit alih-alih main.py membandingkan teks jawaban persis dengan
+        RATE_LIMIT_MESSAGE (rapuh: jawaban asli dari LLM yang kebetulan sama persis dengan
+        kalimat itu akan salah terklasifikasi sebagai rate-limit).
     """
     for attempt in range(2):  # maksimal 2 percobaan (1 retry)
         try:
@@ -144,7 +149,7 @@ def _call_llm_with_retry(prompt: str) -> str:
                     max_output_tokens=2048,
                 ),
             )
-            return response.text
+            return response.text, "ok"
 
         except Exception as e:
             error_str = str(e).lower()
@@ -156,7 +161,7 @@ def _call_llm_with_retry(prompt: str) -> str:
                 time.sleep(2)
             elif (is_rate_limit or is_unavailable) and attempt == 1:
                 logger.error(f"Rate limit tetap terjadi setelah retry: {e}")
-                return RATE_LIMIT_MESSAGE
+                return RATE_LIMIT_MESSAGE, "rate_limited"
             else:
                 logger.error(f"Error tak terduga saat memanggil Gemini: {e}")
                 raise

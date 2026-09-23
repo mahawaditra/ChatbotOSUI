@@ -3,6 +3,7 @@ Modul indexing: memproses PDF → chunks → embed → simpan ke vector store lo
 Menggunakan REST API v1 langsung untuk embedding (text-embedding-004 hanya ada di v1, bukan v1beta).
 """
 
+import concurrent.futures
 import logging
 import re
 import requests
@@ -55,6 +56,14 @@ _PASAL_SPLITTER = RecursiveCharacterTextSplitter(
 _EMBED_MAX_ATTEMPTS = 4
 _EMBED_RETRY_DELAYS = [3, 8, 20]  # detik, exponential backoff antar percobaan
 _EMBED_CALL_SPACING = 0.3  # jeda kecil antar panggilan sukses, biar tidak burst ke rate limit
+
+# Batas wajar untuk PDF di dokumen/ — dokumen AD/ART & SOP asli semuanya jauh di bawah ini.
+# Mencegah PDF yang di-craft khusus (halaman sangat banyak, objek bertumpuk/decompression
+# bomb) menghabiskan memori/CPU tanpa batas saat reindex. Ini butuh akses tulis ke repo
+# (dokumen/ dan admin/reindex) yang sama seperti prasyarat risiko lain yang sudah diketahui
+# di proyek ini — bukan permukaan serangan baru, tapi tetap murah untuk dibatasi.
+_MAX_PDF_PAGES = 500
+_PDF_LOAD_TIMEOUT_SECONDS = 60
 
 
 def _embed_one_with_retry(text: str) -> list[float]:
@@ -200,7 +209,25 @@ def run_indexing() -> dict[str, Any]:
 
         try:
             loader = PyPDFLoader(str(pdf_path))
-            pages = loader.load()
+            # loader.load() dijalankan di thread terpisah dengan batas waktu — kalau PDF-nya
+            # corrupt/berbahaya dan parsing menggantung, ini menghentikan loop indexing dari
+            # menunggu selamanya (thread yang menggantung sendiri tidak bisa dipaksa berhenti
+            # dari Python, tapi loop utama tidak akan ikut terjebak menunggunya).
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(loader.load)
+                try:
+                    pages = future.result(timeout=_PDF_LOAD_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    raise RuntimeError(
+                        f"Parsing {file_name} melebihi {_PDF_LOAD_TIMEOUT_SECONDS} detik "
+                        "(kemungkinan PDF corrupt) — dilewati."
+                    )
+
+            if len(pages) > _MAX_PDF_PAGES:
+                raise ValueError(
+                    f"{file_name} punya {len(pages)} halaman, melebihi batas wajar "
+                    f"{_MAX_PDF_PAGES} — kemungkinan PDF corrupt, dilewati."
+                )
 
             # Netralkan tag pembatas prompt (<konteks_dokumen>, <pertanyaan_user>, dst.) kalau
             # secara literal muncul di teks PDF, supaya dokumen yang "diracuni" tidak bisa

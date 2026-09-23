@@ -185,8 +185,6 @@ The deployment target has changed a couple of times during development. **The cu
 - **Environment variables** (`GEMINI_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `ADMIN_KEY`) need to be set in the Vercel project's dashboard (Settings → Environment Variables) or via `vercel env add` — this is account-side and can't be done from a config file in this repo. No vector-DB credentials are needed at all anymore.
 - A real bug this surfaced: `app/main.py` used to create `logs/` unconditionally at import time with no error handling. On Vercel's read-only-outside-`/tmp` filesystem that would have crashed the app at cold start, not just silently dropped logging — it's now wrapped in `try/except` so a failure there just disables file-based logging instead. Per-request JSON logs (`logs/*.json`) still won't persist on Vercel either way; regular `logging` calls (already used throughout) show up fine in Vercel's Function Logs regardless.
 
-*(Historical note, in case old instructions resurface: the `Dockerfile` in this repo targets Railway's injected `PORT` env var, and an earlier version of this README documented deploying to Render. Neither is used by the Vercel path — Vercel builds directly from source for a recognized Python framework and ignores the `Dockerfile` entirely.)*
-
 ## Known limitations
 
 - **Indexing is always a full rebuild.** There's no per-document delete/update — every reindex re-processes and re-embeds all PDFs in `dokumen/` and overwrites the entire local vector store.

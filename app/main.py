@@ -8,18 +8,23 @@ Endpoints:
     POST /admin/reindex → Reindex semua dokumen PDF
 """
 
+import asyncio
 import hmac
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+import requests
 from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from starlette.middleware.base import BaseHTTPMiddleware
 from upstash_ratelimit.asyncio import Ratelimit, SlidingWindow
 from upstash_redis.asyncio import Redis
 
@@ -29,9 +34,15 @@ from app.config import (
     MAX_QUESTION_LENGTH,
     RATE_LIMIT_REQUESTS,
     RATE_LIMIT_WINDOW_SECONDS,
+    validate_server_config,
 )
-from app.rag.chain import get_answer, RATE_LIMIT_MESSAGE
+from app.rag.chain import get_answer
 from app.rag.indexing import run_indexing
+
+# Menegakkan secret yang dibutuhkan server sungguhan (ADMIN_KEY, Upstash Redis) — dipisah
+# dari app/config.py supaya mengimpor config lewat jalur lain (mis. scripts/reindex.py)
+# tidak ikut wajib menyediakan secret yang tidak dipakainya. Lihat app/config.py.
+validate_server_config()
 
 # --- Setup logging ---
 logging.basicConfig(
@@ -77,9 +88,20 @@ _chat_ratelimit = Ratelimit(
     prefix="ratelimit:chat",
 )
 
+# Mencegah dua /admin/reindex berjalan bersamaan (lihat reindex() di bawah).
+_reindex_lock = threading.Lock()
+
 
 def _get_client_ip(http_request: Request) -> str:
-    """IP asli client di belakang proxy (Vercel/Render mengisi X-Forwarded-For)."""
+    """
+    IP asli client di belakang proxy. Vercel MENIMPA (bukan menambah/append) header
+    X-Forwarded-For dengan IP client yang benar-benar diamatinya dan membuang nilai apapun
+    yang dikirim client — jadi mengambil entri pertama di sini aman dari spoofing SELAMA
+    deploy di Vercel tanpa proxy/CDN lain (mis. Cloudflare) di depannya. Ini jaminan
+    platform-specific yang bisa berubah diam-diam kalau proxy lain ditambahkan di depan, atau
+    kalau deployment pindah ke platform lain (Render/Railway/Docker) — perilaku X-Forwarded-For
+    di sana BELUM diverifikasi sama amannya, jangan asumsikan otomatis sama.
+    """
     forwarded = http_request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -102,6 +124,111 @@ def _is_origin_allowed(http_request: Request) -> bool:
     except ValueError:
         return False
     return origin_host == http_request.url.hostname
+
+
+# Batas ukuran body mentah untuk POST /api/chat, ditegakkan di ChatGuardMiddleware SEBELUM
+# body dibaca/di-parse sama sekali. Cukup longgar untuk message 500 karakter + 6 item histori
+# (masing-masing maks 800 karakter) plus overhead JSON, jauh di bawah level abuse.
+MAX_CHAT_BODY_BYTES = 10_000
+
+# Berapa lama menunggu Upstash Redis merespons cek rate limit sebelum menyerah dan fail-open.
+# Library upstash_redis mengonstruksi HTTP client-nya dengan timeout=None (tanpa batas) dan
+# tidak menyediakan cara resmi untuk mengubahnya lewat Redis.from_env()/Ratelimit — jadi batas
+# waktu ditegakkan di sisi pemanggilan lewat asyncio.wait_for, bukan di client itu sendiri.
+# Tanpa ini, Upstash yang lambat/menggantung tidak akan gagal cepat seperti yang diasumsikan
+# alasan fail-open di bawah — dia akan menggantung sampai Vercel membunuh seluruh request.
+_RATELIMIT_CHECK_TIMEOUT_SECONDS = 5.0
+
+
+class ChatGuardMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware pengecekan body-size + Origin + rate-limit untuk POST /api/chat, dijalankan
+    SEBELUM FastAPI/Pydantic membaca & memvalidasi body request.
+
+    Kenapa ini middleware dan bukan kode di dalam handler chat(): Pydantic memvalidasi body
+    (ChatRequest) sebagai bagian dari resolusi dependency SEBELUM isi fungsi chat() sempat
+    berjalan. Kalau pengecekan Origin/rate-limit ada di dalam chat(), request yang sengaja
+    dibuat gagal validasi (mis. message > 500 karakter, atau history > 6 item) mendapat 422
+    tanpa PERNAH menyentuh kedua pengecekan itu — artinya siapa pun bisa mem-flood endpoint
+    ini tanpa batas dan gratis selama payload-nya "salah". Middleware berjalan di level ASGI,
+    sebelum body dibaca sama sekali, jadi tidak bisa dilewati dengan cara ini.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method != "POST" or request.url.path != "/api/chat":
+            return await call_next(request)
+
+        content_length = request.headers.get("content-length")
+        if content_length is not None and content_length.isdigit() and int(content_length) > MAX_CHAT_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"answer": "Permintaan terlalu besar.", "sources": []},
+            )
+
+        if not _is_origin_allowed(request):
+            return JSONResponse(
+                status_code=403,
+                content={"answer": "Origin tidak diizinkan.", "sources": []},
+            )
+
+        client_ip = _get_client_ip(request)
+        try:
+            rl_allowed = (
+                await asyncio.wait_for(
+                    _chat_ratelimit.limit(client_ip), timeout=_RATELIMIT_CHECK_TIMEOUT_SECONDS
+                )
+            ).allowed
+        except Exception as e:
+            # Fail-open: kalau Upstash Redis sendiri bermasalah/salah konfigurasi/lambat, jangan
+            # sampai itu membuat seluruh /api/chat down untuk semua orang — itu risiko yang lebih
+            # besar daripada sementara tidak ada rate limiting. Level ERROR (bukan warning) karena
+            # ini artinya rate limiting sedang NONAKTIF total untuk semua user, bukan kejadian kecil.
+            logger.error(f"Rate limiter error/timeout, rate limiting DINONAKTIFKAN sementara: {e}")
+            rl_allowed = True
+
+        if not rl_allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "answer": "Terlalu banyak permintaan. Silakan coba lagi sebentar lagi.",
+                    "sources": [],
+                },
+            )
+
+        return await call_next(request)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Header keamanan standar di setiap response. HSTS tidak perlu ditambahkan manual —
+    Vercel sudah menerapkannya otomatis untuk domain *.vercel.app maupun custom domain.
+
+    Catatan soal CSP script-src: index.html punya puluhan atribut event handler inline
+    (onclick=/oninput= di markup statis sidebar, tombol, dsb.), bukan cuma satu blok <script>.
+    Nonce CSP hanya berlaku untuk elemen <script>, TIDAK untuk atribut handler seperti itu —
+    menghapusnya semua ke addEventListener() adalah refactor frontend besar di luar cakupan
+    pass ini. 'unsafe-inline' di script-src karena itu adalah kompromi sadar, bukan oversight:
+    nilai keamanan CSP di sini tetap nyata lewat frame-ancestors (anti-clickjacking) dan
+    membatasi origin eksternal yang boleh dimuat, walau tidak menutup total XSS berbasis script.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'"
+        )
+        return response
+
+
+app.add_middleware(ChatGuardMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # --- Pydantic models ---
@@ -207,43 +334,27 @@ async def chat(chat_request: ChatRequest, http_request: Request):
     """
     Endpoint utama chatbot RAG.
     Menerima pertanyaan user dan mengembalikan jawaban beserta sumber dokumen.
+
+    Pengecekan Origin dan rate-limit ada di ChatGuardMiddleware (jalan sebelum body di-parse
+    Pydantic), bukan di sini — lihat docstring middleware tersebut untuk alasannya.
     """
     if not chat_request.message.strip():
         raise HTTPException(status_code=422, detail="Pertanyaan tidak boleh kosong.")
-
-    if not _is_origin_allowed(http_request):
-        raise HTTPException(status_code=403, detail="Origin tidak diizinkan.")
-
-    client_ip = _get_client_ip(http_request)
-    try:
-        rl_allowed = (await _chat_ratelimit.limit(client_ip)).allowed
-    except Exception as e:
-        # Fail-open: kalau Upstash Redis sendiri bermasalah/salah konfigurasi, jangan sampai
-        # itu membuat seluruh /api/chat down untuk semua orang — itu risiko yang lebih besar
-        # daripada sementara tidak ada rate limiting.
-        logger.warning(f"Rate limiter error, melewatkan pengecekan rate limit: {e}")
-        rl_allowed = True
-
-    if not rl_allowed:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "answer": "Terlalu banyak permintaan. Silakan coba lagi sebentar lagi.",
-                "sources": [],
-            },
-        )
 
     start_time = time.perf_counter()
     status = "success"
 
     try:
         history = [{"role": h.role, "content": h.content} for h in chat_request.history]
-        result = get_answer(chat_request.message, history=history)
+        # get_answer() melakukan panggilan jaringan sinkron/blocking (embed + Gemini, termasuk
+        # time.sleep saat retry) — dijalankan di threadpool supaya tidak menahan event loop dan
+        # ikut menunda user lain yang concurrent (lebih terasa di deployment single-worker
+        # non-serverless seperti Dockerfile/Render/Railway).
+        result = await run_in_threadpool(get_answer, chat_request.message, history=history)
         answer = result["answer"]
         sources = result["sources"]
 
-        # Cek apakah jawaban adalah pesan rate limit
-        if answer == RATE_LIMIT_MESSAGE:
+        if result.get("status") == "rate_limited":
             status = "rate_limit"
             return JSONResponse(
                 status_code=503,
@@ -284,14 +395,31 @@ async def reindex(x_admin_key: str = Header(None)):
     if not hmac.compare_digest(x_admin_key or "", ADMIN_KEY):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    logger.info("Reindex dimulai oleh admin...")
+    # Non-blocking acquire: run_indexing() makan waktu beberapa menit (embed ratusan chunk
+    # satu-satu). Kalau dijalankan langsung tanpa run_in_threadpool, itu menahan event loop
+    # dan membekukan SEMUA request lain (termasuk /api/chat) selama itu. Lock mencegah dua
+    # reindex nyaris bersamaan menulis vector_store.save() secara konkuren (walau save() sudah
+    # atomic per-panggilan, dua panggilan overlap tetap bisa saling menimpa hasil satu sama lain).
+    if not _reindex_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Reindex lain sedang berjalan, coba lagi nanti.")
+
     try:
-        result = run_indexing()
+        logger.info("Reindex dimulai oleh admin...")
+        result = await run_in_threadpool(run_indexing)
         logger.info(f"Reindex selesai: {result}")
         return {"status": "success", **result}
 
     except FileNotFoundError as e:
         logger.error(f"Reindex gagal - file tidak ditemukan: {e}")
+        raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")
+
+    except requests.exceptions.RequestException as e:
+        # HARUS dicek SEBELUM (OSError, PermissionError) di bawah: requests.exceptions.
+        # RequestException (termasuk HTTPError dari embed API) mewarisi IOError, yang di
+        # Python 3 adalah alias OSError — tanpa cabang ini, kegagalan panggilan API embedding
+        # (mis. quota habis, key salah) akan salah tertangkap sebagai "OSError" dan dilaporkan
+        # dengan pesan "filesystem read-only" yang menyesatkan admin yang men-debug.
+        logger.error(f"Reindex gagal - panggilan API embedding gagal: {e}")
         raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")
 
     except (OSError, PermissionError) as e:
@@ -308,3 +436,6 @@ async def reindex(x_admin_key: str = Header(None)):
     except Exception as e:
         logger.error(f"Reindex gagal: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")
+
+    finally:
+        _reindex_lock.release()

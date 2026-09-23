@@ -120,12 +120,12 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-| Variable                   | Required | Description                                                    |
-| -------------------------- | -------- | -------------------------------------------------------------- |
-| `GEMINI_API_KEY`           | Yes      | Google AI Studio API key — see [Organization accounts](#organization-accounts) |
-| `UPSTASH_REDIS_REST_URL`   | Yes      | Upstash Redis REST endpoint — see [Organization accounts](#organization-accounts) |
-| `UPSTASH_REDIS_REST_TOKEN` | Yes      | Upstash Redis REST token — see [Organization accounts](#organization-accounts) |
-| `ADMIN_KEY`                | Yes      | Generate your own, don't reuse a previous admin's, see below   |
+| Variable                   | Required | Description                                                                      |
+| -------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY`           | Yes      | Google AI Studio API key, see [Organization accounts](#organization-accounts)    |
+| `UPSTASH_REDIS_REST_URL`   | Yes      | Upstash Redis REST endpoint, see [Organization accounts](#organization-accounts) |
+| `UPSTASH_REDIS_REST_TOKEN` | Yes      | Upstash Redis REST token, see [Organization accounts](#organization-accounts)    |
+| `ADMIN_KEY`                | Yes      | Generate your own, don't reuse a previous admin's, see below                     |
 
 Generate a secure `ADMIN_KEY`:
 
@@ -201,7 +201,7 @@ Pushing to `main` automatically triggers a new deploy (see [Deployment](#deploym
 
 This project uses accounts **owned by the organization** (not any individual's personal account) for two external services: Google AI Studio (source of `GEMINI_API_KEY`) and Upstash (source of `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`).
 
-> **Actual login credentials (account email/password, API keys, tokens) are intentionally NOT stored in this repository.** They're shared with current admins via the organization's Google Drive instead, so they can be rotated without needing a new commit, and so access can be revoked for someone who no longer needs it without that history lingering in git forever. If you're a new admin and don't have access to that Drive folder yet, ask the outgoing admin or current org leadership to share it with you.
+> Ask the "Pengurus Inti (PI)" for the credentials
 
 Whoever currently holds these credentials is responsible for keeping the Drive document up to date whenever a key/token is rotated, and for passing access down at the next leadership transition.
 

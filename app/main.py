@@ -30,9 +30,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Folder untuk menyimpan log request harian
+# Folder untuk menyimpan log request harian.
+# Best-effort: di platform serverless (mis. Vercel) filesystem read-only di luar /tmp,
+# jadi mkdir ini bisa gagal — jangan sampai itu bikin seluruh app gagal start.
 LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
+try:
+    LOG_DIR.mkdir(exist_ok=True)
+except OSError as e:
+    logger.warning(f"Tidak bisa membuat folder log ({LOG_DIR}), file-based logging dinonaktifkan: {e}")
 
 
 # --- FastAPI app ---

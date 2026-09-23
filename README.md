@@ -1,6 +1,6 @@
 # OSUI Mahawaditra RAG Chatbot
 
-A Retrieval-Augmented Generation (RAG) chatbot that lets members of **OSUI Mahawaditra** (Orkes Simfoni Universitas Indonesia) ask questions in plain Indonesian about the organization's **AD/ART** (bylaws) and divisional **SOPs**, and get answers grounded in — and cited to — the actual documents.
+A Retrieval-Augmented Generation (RAG) chatbot that lets members of **OSUI Mahawaditra** (Orkes Simfoni Universitas Indonesia) ask questions in plain Indonesian about the organization's **AD/ART** (bylaws) and divisional **SOPs**, and get answers grounded in and cited to the actual documents.
 
 ## Why this exists
 
@@ -160,13 +160,21 @@ Response:
 
 ## Deployment
 
-The deployment target has changed a couple of times during development. **The current plan is [Vercel](https://vercel.com/)**, but this app wasn't originally architected for a serverless platform, and a few things need attention before it will work well there:
+The deployment target has changed a couple of times during development. **The current plan is [Vercel](https://vercel.com/)**, on the free **Hobby** plan. Vercel's native Python/FastAPI support (verified against their docs, not assumed) makes this mostly zero-config, but a few things needed preparing:
 
-- **`/admin/reindex` can take a couple of minutes** (each chunk is embedded one at a time, with retries on rate limits). This will very likely exceed Vercel's serverless function time limit (10s on Hobby, 60s on Pro). Consider triggering reindexing from a separate script/CI job instead of the hosted endpoint, at least for large rebuilds.
-- **Local file-based request logging (`logs/*.json`) won't persist** on Vercel's ephemeral, mostly-read-only filesystem. This fails silently today (write errors are caught and only logged, never surfaced to users), so the app itself keeps working — you'd just lose the logs. Point this at an external store if you need it in production.
-- Serving the PDFs (for the in-app "open source document" viewer) and the static frontend should work fine as-is, since Vercel serves bundled static files without issue.
+- **Entrypoint** — Vercel auto-detects a `FastAPI` instance named `app` at `app/main.py`, which this repo already has. No adapter/shim needed.
+- **Runtime version** — pinned via `.python-version` (`3.12`, Vercel's current default) so the deployed runtime doesn't silently drift if Vercel's own default changes later.
+- **`vercel.json`** sets `maxDuration` for the `/api/chat` path. It's deliberately *not* stretched to cover a full reindex — Hobby's duration ceiling can't fit that regardless of configuration.
+- **Reindexing does not go through the deployed endpoint on Hobby.** `/admin/reindex` can take a couple of minutes (chunks are embedded one at a time, with retries), which exceeds Hobby's function time limit no matter how it's configured. Use `scripts/reindex.py` instead — it calls the same `run_indexing()` directly against Upstash + Gemini, bypassing Vercel (and its duration limit) entirely:
+  ```bash
+  python scripts/reindex.py
+  ```
+  Run it with the **production** credentials in scope (e.g. a `.env` pointed at the production Upstash index) whenever `dokumen/` changes. `/admin/reindex` still works for local dev via `uvicorn`, just isn't relied on once deployed.
+- **Static & document serving needs no code changes.** Vercel's FastAPI integration auto-promotes `app.mount(..., StaticFiles(...))` directories (`/static`, `/dokumen`) to its CDN while *also* keeping them in the function bundle by default — which is exactly what's needed here, since `run_indexing()` reads `dokumen/*.pdf` from disk at runtime, not just serves it statically. (`dokumen/` is ~3.8MB total, nowhere near Vercel's 500MB bundle limit.)
+- **Environment variables** (`GEMINI_API_KEY`, `UPSTASH_VECTOR_REST_URL`, `UPSTASH_VECTOR_REST_TOKEN`, `ADMIN_KEY`, `COLLECTION_NAME`) need to be set in the Vercel project's dashboard (Settings → Environment Variables) or via `vercel env add` — this is account-side and can't be done from a config file in this repo.
+- A real bug this surfaced: `app/main.py` used to create `logs/` unconditionally at import time with no error handling. On Vercel's read-only-outside-`/tmp` filesystem that would have crashed the app at cold start, not just silently dropped logging — it's now wrapped in `try/except` so a failure there just disables file-based logging instead. Per-request JSON logs (`logs/*.json`) still won't persist on Vercel either way; regular `logging` calls (already used throughout) show up fine in Vercel's Function Logs regardless.
 
-*(Historical note, in case old instructions resurface: the `Dockerfile` in this repo currently targets Railway's injected `PORT` env var, and an earlier version of this README documented deploying to Render. Neither reflects the current Vercel plan — if you're touching deployment config, go with what's actually decided at the time, not any single doc.)*
+*(Historical note, in case old instructions resurface: the `Dockerfile` in this repo targets Railway's injected `PORT` env var, and an earlier version of this README documented deploying to Render. Neither is used by the Vercel path — Vercel builds directly from source for a recognized Python framework and ignores the `Dockerfile` entirely.)*
 
 ## Known limitations
 

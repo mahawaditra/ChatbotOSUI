@@ -1,0 +1,4 @@
+{
+  "embedding_model": "gemini-embedding-001",
+  "embedding_dimension": 1536
+}

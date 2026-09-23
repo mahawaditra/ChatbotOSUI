@@ -122,9 +122,9 @@ cp .env.example .env
 
 | Variable                   | Required | Description                                                    |
 | -------------------------- | -------- | -------------------------------------------------------------- |
-| `GEMINI_API_KEY`           | Yes      | REDACTED_GEMINI_API_KEY          |
-| `UPSTASH_REDIS_REST_URL`   | Yes      | https://REDACTED_UPSTASH_HOST                        |
-| `UPSTASH_REDIS_REST_TOKEN` | Yes      | REDACTED_UPSTASH_TOKEN |
+| `GEMINI_API_KEY`           | Yes      | Google AI Studio API key — see [Organization accounts](#organization-accounts) |
+| `UPSTASH_REDIS_REST_URL`   | Yes      | Upstash Redis REST endpoint — see [Organization accounts](#organization-accounts) |
+| `UPSTASH_REDIS_REST_TOKEN` | Yes      | Upstash Redis REST token — see [Organization accounts](#organization-accounts) |
 | `ADMIN_KEY`                | Yes      | Generate your own, don't reuse a previous admin's, see below   |
 
 Generate a secure `ADMIN_KEY`:
@@ -133,7 +133,7 @@ Generate a secure `ADMIN_KEY`:
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-> The current API-Key or Token are from this organization account named osuirealted.mahawaditra@gmail.com (an organizational account made for project purposes). you can continue use this API-Key/Token but if anything happens you can always change it (Read it in [Organization accounts](#organization-accounts))
+> Actual credential values are **not stored in this repo** — see [Organization accounts](#organization-accounts) for where to find them.
 
 ### 5. Replace SOP documents
 
@@ -199,19 +199,16 @@ Pushing to `main` automatically triggers a new deploy (see [Deployment](#deploym
 
 ## Organization accounts
 
-Login credentials for accounts **owned by the organization** (not any individual's personal account) for the two external services this chatbot uses: Google AI Studio (source of `GEMINI_API_KEY`) and Upstash (source of `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`). Any admin who needs to regenerate or look up a key or token (e.g. quota ran out, a key needs rotating, or a new Redis database is needed) can just log in with the accounts below, without having to ask a previous admin one by one.
+This project uses accounts **owned by the organization** (not any individual's personal account) for two external services: Google AI Studio (source of `GEMINI_API_KEY`) and Upstash (source of `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`).
 
-> These credentials are deliberately stored directly in a file committed to git, so that it can be passed down to future admins for as long as they have access to this repository.
+> **Actual login credentials (account email/password, API keys, tokens) are intentionally NOT stored in this repository.** They're shared with current admins via the organization's Google Drive instead, so they can be rotated without needing a new commit, and so access can be revoked for someone who no longer needs it without that history lingering in git forever. If you're a new admin and don't have access to that Drive folder yet, ask the outgoing admin or current org leadership to share it with you.
 
-### Organization Account (Google)
-- Email: osuirelated.mahawaditra@gmail.com
-- Password: REDACTED_PASSWORD
+Whoever currently holds these credentials is responsible for keeping the Drive document up to date whenever a key/token is rotated, and for passing access down at the next leadership transition.
 
 ### Gemini API key
 - API key dashboard: https://aistudio.google.com/apikey
 
 ### Upstash (for the Redis rate-limit token)
-- Login: Use Google Login with osuirelated.mahawaditra@gmail.com account
 - Dashboard: https://console.upstash.com/redis
 
 ## Tech stack

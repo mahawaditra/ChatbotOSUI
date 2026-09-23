@@ -8,14 +8,14 @@ AD/ART and SOP documents are long and dense. In practice, members (and even comm
 
 This chatbot exists so members can just ask, in natural language, and get an answer sourced directly from the real document — with a link straight to the page it came from, so they can verify it themselves.
 
-This is also the author's first hands-on project exploring RAG. Some of the retrieval design (see [How Retrieval Works](#how-retrieval-works)) reflects lessons learned by hitting real issues with a small, low-resource setup (free-tier LLM + vector DB) rather than a from-the-start "correct" architecture — noted here in case it's useful context for anyone reading the code.
+This is also the author's first hands-on project exploring RAG. Some of the retrieval design (see [How it works](#how-it-works)) reflects lessons learned by hitting real issues with a small, low-resource setup (free-tier LLM + vector DB) rather than a from-the-start "correct" architecture — noted here in case it's useful context for anyone reading the code.
 
 ## Features
 
 - **Grounded Q&A in Indonesian** — answers come only from the actual AD/ART and SOP content; if it's not in the documents, the bot says so instead of guessing.
 - **Cited, clickable sources** — every answer lists the source file(s) and page(s) it was drawn from. Clicking a source opens the PDF in-app and jumps straight to that page.
 - **Context-aware follow-ups** — short follow-up questions ("terus kalau resign gimana?") are automatically rewritten into standalone queries using the conversation history, so retrieval quality doesn't degrade in multi-turn conversations.
-- **Admin-triggered reindexing** — whenever documents change, an admin can rebuild the entire searchable index with one authenticated request.
+- **Admin-triggered reindexing** — whenever documents change, an admin can rebuild the entire searchable index.
 
 ## User flow
 
@@ -27,9 +27,9 @@ This is also the author's first hands-on project exploring RAG. Some of the retr
 5. Ask a follow-up without repeating context — the app resolves what you mean using the chat so far.
 6. If the question is off-topic or genuinely not covered by the documents, the bot says so explicitly rather than making something up.
 
-**Admin:**
-1. Add or replace PDF files in `dokumen/`.
-2. Rebuild the entire local vector store (always a full rebuild — see [Known Limitations](#known-limitations)) and commit the result — see [Updating documents](#updating-documents).
+**Admin (setiap pergantian kepengurusan):**
+1. Ganti PDF di `dokumen/` dengan SOP tahun berjalan.
+2. Rebuild seluruh vector store lokal (selalu full rebuild — lihat [Known limitations](#known-limitations)) dan commit hasilnya — panduan lengkapnya ada di [Update SOP tahunan (pergantian kepengurusan)](#update-sop-tahunan-pergantian-kepengurusan).
 
 ## Tech stack
 
@@ -44,19 +44,42 @@ This is also the author's first hands-on project exploring RAG. Some of the retr
 
 ## How it works
 
-### Indexing (`python scripts/reindex.py`, full rebuild — see [Deployment](#deployment))
-1. Every PDF in `dokumen/` is loaded page by page.
-2. Documents that follow a `"Pasal <N>"` article structure (currently the AD/ART) are split along those article boundaries instead of by raw character count, so a single article isn't cut in half mid-sentence. Documents without that structure (the SOPs) fall back to standard character-based chunking.
-3. Each chunk is embedded individually via the Gemini embedding API (with automatic retry/backoff on rate limits) and written to the local vector store (`app/rag/vector_store.py`). **The entire existing store is overwritten** — there is no incremental/per-document update.
+### Indexing — `python scripts/reindex.py` (full rebuild, see [Deployment](#deployment))
 
-### Answering a question (`POST /api/chat`)
-1. If there's prior conversation history, the question is first rewritten by the LLM into a standalone query (so "terus kalau resign gimana?" keeps referring to whatever was being discussed).
-2. That query is embedded and used to fetch a wider pool of candidate chunks from the local vector store than what's actually needed (see `RETRIEVAL_FETCH_K` in [Known Limitations](#known-limitations) — a leftover from the old Upstash-based search, kept as-is for now even though exact local search no longer strictly needs it), which are then filtered by a minimum similarity score and trimmed down to the top few.
-3. If nothing relevant survives that filter, the bot returns a refusal message **without calling the LLM at all** — saves cost/latency and avoids answering from irrelevant context.
-4. Otherwise, the surviving chunks, the original question, and recent history are assembled into a prompt — with document context, user input, and history each wrapped in separate tags as a prompt-injection guard — and sent to Gemini.
-5. The answer is returned with a deduplicated list of sources (file + page).
+```mermaid
+flowchart TD
+    A["PDF di folder dokumen/"] --> B{"Berstruktur Pasal?<br/>(dokumen AD/ART)"}
+    B -->|Ya| C["Split di boundary tiap Pasal,<br/>bukan per jumlah karakter"]
+    B -->|Tidak, mis. SOP| D["Split per jumlah karakter<br/>(RecursiveCharacterTextSplitter)"]
+    C --> E["Embed tiap chunk satu per satu<br/>lewat Gemini Embedding API"]
+    D --> E
+    E --> F["Timpa TOTAL data/vector_store/<br/>(vectors.npy + metadata.json + manifest.json)"]
+```
+
+Documents that follow a `"Pasal <N>"` article structure (currently the AD/ART) are split along those article boundaries instead of by raw character count, so a single article isn't cut in half mid-sentence. Documents without that structure (the SOPs) fall back to standard character-based chunking. **The entire existing vector store is overwritten every time** — there is no incremental/per-document update, so there's no separate "delete old data" step; reindexing already replaces everything.
+
+### Answering a question — `POST /api/chat`
+
+```mermaid
+flowchart TD
+    Q["Pertanyaan user"] --> H{"Ada riwayat<br/>percakapan sebelumnya?"}
+    H -->|Ya| R["LLM ubah jadi standalone query<br/>(1x panggilan Gemini tambahan)"]
+    H -->|Tidak| S["Pakai pertanyaan apa adanya"]
+    R --> V["Embed query hasil rewrite"]
+    S --> V
+    V --> M["Cari kandidat chunk paling mirip<br/>di vector store lokal (cosine similarity)"]
+    M --> T{"Ada chunk dengan skor<br/>>= SIMILARITY_THRESHOLD?"}
+    T -->|Tidak| X["Jawab langsung: 'informasi tidak ditemukan'<br/>(TANPA panggil LLM sama sekali)"]
+    T -->|Ya| P["Susun prompt: konteks dokumen<br/>+ pertanyaan ASLI (bukan hasil rewrite)<br/>+ riwayat percakapan"]
+    P --> L["Panggil Gemini untuk jawaban akhir"]
+    L --> AN["Jawaban + daftar sumber<br/>(file + halaman, sudah dideduplikasi)"]
+```
+
+If there's prior conversation history, the question is first rewritten by the LLM into a standalone query (so "terus kalau resign gimana?" keeps referring to whatever was being discussed) — retrieval uses this rewritten query, but the final prompt uses the *original* question so citations/phrasing track what the user actually asked. Retrieval fetches a wider pool of candidates than what's actually needed (see `RETRIEVAL_FETCH_K` in [Known limitations](#known-limitations) — a leftover from the old Upstash-based search), filters by a minimum similarity score, and trims to the top few. If nothing relevant survives that filter, the bot returns a refusal message without calling the LLM at all — saves cost/latency and avoids answering from irrelevant context.
 
 ## Getting started
+
+Referensi teknis umum untuk development. Kalau tujuanmu spesifik "ganti SOP tahun ini", langsung saja ke [Update SOP tahunan (pergantian kepengurusan)](#update-sop-tahunan-pergantian-kepengurusan) — bagian itu sudah mencakup semua langkah di bawah ini plus langkah spesifiknya.
 
 ### Prerequisites
 - Python 3.11+
@@ -92,44 +115,159 @@ python -c "import secrets; print(secrets.token_hex(32))"
 > All required variables are read eagerly at startup (`app/config.py`) — the app fails immediately on launch if any are missing, rather than failing later on a request.
 
 ### 3. Run the dev server
-```bash
+
+**Windows** — kalau kamu belum meng-aktivasi virtual environment di sesi terminal ini, jalankan lewat `python` di dalam `.venv` secara langsung (lebih aman daripada bergantung ke PATH):
+```powershell
+.\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8080
+```
+Atau aktivasi dulu venv-nya, baru command `uvicorn` biasa bisa dipakai:
+```powershell
+.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload --port 8080
 ```
+
+**macOS / Linux:**
+```bash
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8080
+```
+
 Open `http://localhost:8080` in your browser.
 
 ### 4. Index your documents (required before first use, and after any document change)
 
-This overwrites the **entire** local vector store (`data/vector_store/`). With more/larger documents this can take a couple of minutes, since each chunk is embedded one at a time with automatic retry on rate limits.
+Lihat [Update SOP tahunan (pergantian kepengurusan)](#update-sop-tahunan-pergantian-kepengurusan) untuk penjelasan lengkap — command intinya adalah `python scripts/reindex.py`.
 
-For local dev, either call the admin endpoint:
+## Update SOP tahunan (pergantian kepengurusan)
 
-**macOS / Linux / Git Bash:**
+> **Untuk pengurus baru**: bagian ini panduan lengkap, dari nol, untuk mengganti dokumen SOP/AD-ART setiap ada pergantian kepengurusan. Ikuti urut dari atas ke bawah — tidak perlu baca bagian lain dulu.
+
+Alur singkatnya seperti ini:
+
+```mermaid
+flowchart TD
+    A["1. Clone repository"] --> B["2. Buat & aktifkan<br/>virtual environment"]
+    B --> C["3. pip install -r requirements.txt"]
+    C --> D["4. Isi file .env"]
+    D --> E["5. Hapus SOP lama,<br/>taruh SOP baru di dokumen/"]
+    E --> F["6. python scripts/reindex.py<br/>(embedding sampai selesai)"]
+    F --> G["7. Jalankan server lokal,<br/>coba tanya-jawab"]
+    G --> Z{"Jawaban sudah sesuai<br/>SOP yang baru?"}
+    Z -->|Belum, ada yang salah| E
+    Z -->|Sudah benar| I["8. git add, commit, push ke main"]
+    I --> J["Vercel otomatis redeploy"]
+```
+
+### 1. Clone repository
+
 ```bash
-curl -X POST http://localhost:8080/admin/reindex -H "X-Admin-Key: YOUR_ADMIN_KEY"
+git clone https://github.com/mahawaditra/ChatbotOSUI.git
+cd ChatbotOSUI
 ```
 
-**Windows PowerShell:**
+### 2. Buat & aktifkan virtual environment
+
+Virtual environment (`venv`) tidak wajib secara teknis, tapi sangat disarankan supaya versi package project ini tidak bentrok dengan Python lain di device kamu. Folder `.venv/` sengaja tidak ikut ter-clone dari git (ada di `.gitignore`), jadi harus dibuat baru di device manapun kamu kerja:
+
+**Windows (PowerShell):**
 ```powershell
-curl.exe -X POST http://localhost:8080/admin/reindex -H "X-Admin-Key: YOUR_ADMIN_KEY"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
-> On Windows, plain `curl` in PowerShell is usually an alias for `Invoke-WebRequest`, which does **not** understand curl-style `-X`/`-H` flags and will fail. Use `curl.exe` explicitly (forces the real curl binary) as shown above, or use a native PowerShell cmdlet instead:
-> ```powershell
-> Invoke-RestMethod -Method Post -Uri http://localhost:8080/admin/reindex -Headers @{ "X-Admin-Key" = "YOUR_ADMIN_KEY" }
-> ```
+> Kalau muncul error "running scripts is disabled on this system" saat menjalankan `Activate.ps1`, itu artinya PowerShell execution policy memblokirnya. Solusi paling gampang: skip aktivasi, dan di setiap command Python/uvicorn di bawah, panggil langsung `.\.venv\Scripts\python.exe` alih-alih `python`/`uvicorn` biasa — ini menjamin selalu pakai package yang benar dari `.venv`, terlepas dari execution policy atau PATH.
 
-Replace `YOUR_ADMIN_KEY` with the actual value from your `.env` file directly. Don't rely on shell variable expansion (`$ADMIN_KEY` in bash, `$env:ADMIN_KEY` in PowerShell) unless you've explicitly set it in that same terminal session — `.env` is only loaded by the Python process, not by your shell.
+**macOS / Linux:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
 
-...or run the standalone script directly (no running server needed):
+### 3. Install dependencies
+
+Setelah venv aktif (atau ganti `pip` dengan `.\.venv\Scripts\pip.exe` kalau venv tidak diaktivasi):
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Isi file `.env`
+
+```bash
+cp .env.example .env
+```
+
+Lalu isi `.env` seperti ini:
+
+```env
+# Google AI Studio API key (LLM + embedding) — WAJIB diisi.
+# Nilai di bawah masih pakai API key akun Google AI Studio milik Adiieeee (pembuat awal chatbot
+# ini), tier gratis, jadi boleh langsung dipakai supaya kalian tidak perlu repot bikin akun baru.
+# DISARANKAN untuk generate API key sendiri begitu sempat (gratis, ~2 menit, dari akun Google
+# pengurus yang sedang menjabat) di https://aistudio.google.com/apikey — lalu ganti nilai ini,
+# baik di .env lokal maupun di Environment Variables project Vercel (lihat Deployment).
+GEMINI_API_KEY=REDACTED_GEMINI_API_KEY
+
+# Upstash Redis — WAJIB diisi. Dipakai HANYA untuk rate limiting POST /api/chat (bukan buat
+# menyimpan dokumen atau vector, itu urusan folder data/vector_store/ yang terpisah total).
+# Buat database Redis gratis sendiri di https://console.upstash.com/redis, lalu salin
+# "REST URL" dan "REST TOKEN"-nya ke sini.
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+
+# Secret untuk endpoint POST /admin/reindex — WAJIB diisi, minimal 32 karakter (server akan
+# gagal start kalau tidak). Generate sendiri dengan command di bawah, jangan pakai punya orang
+# lain/tahun lalu:
+# python -c "import secrets; print(secrets.token_hex(32))"
+ADMIN_KEY=
+```
+
+### 5. Ganti dokumen SOP
+
+- File dokumen ada di folder **`dokumen/`**, satu file PDF per divisi/dokumen (mis. `SOP-Divisi-Acara-2026.pdf`, `ADART-OSUIMahawaditra-2022.pdf`).
+- **Hapus** file SOP tahun sebelumnya yang sudah digantikan dari folder `dokumen/` (kalau tidak dihapus, chatbot bisa saja mengutip SOP lama yang sudah tidak berlaku, karena semua PDF di folder ini ikut di-index).
+- **Tambahkan** file PDF SOP yang baru ke folder `dokumen/` yang sama. Ikuti pola penamaan yang sudah ada (`SOP-Divisi-<Nama>-<Tahun>.pdf`) — nama file ini yang akan muncul apa adanya sebagai sumber rujukan di jawaban chatbot, jadi usahakan tetap deskriptif.
+- Kamu **tidak perlu** menghapus isi `data/vector_store/` secara manual — langkah reindex berikutnya otomatis menimpa total isi lama, tidak ada command "hapus vector db" terpisah.
+
+### 6. Jalankan reindex (embedding sampai selesai)
+
 ```bash
 python scripts/reindex.py
 ```
+Atau kalau venv tidak diaktivasi (Windows): `.\.venv\Scripts\python.exe scripts\reindex.py`
 
-Either way, this writes `data/vector_store/vectors.npy` + `metadata.json` to disk — **remember to commit those files** (see [Updating documents](#updating-documents)).
-
-A successful response/output looks like:
-```json
-{"status": "success", "total_chunks_indexed": 246, "files_processed": ["ADART-OSUIMahawaditra-2022.pdf", "SOP-Divisi-Acara-2026.pdf", "..."]}
+Ini akan memproses ulang **SEMUA** PDF yang ada di `dokumen/` sekarang — meng-embed tiap potongan teks satu per satu ke Gemini, lalu menulis ulang total `data/vector_store/vectors.npy` + `metadata.json` + `manifest.json`. Untuk ~10 dokumen ini biasanya makan waktu beberapa menit. Output sukses terlihat seperti:
 ```
+Memulai reindex...
+Selesai. Total chunk ter-index: 246
+File diproses: ADART-OSUIMahawaditra-2022.pdf, SOP-Divisi-Acara-2026.pdf, ...
+```
+Pastikan daftar `File diproses` di atas sudah sesuai isi `dokumen/` yang baru (tidak ada SOP lama yang harusnya sudah dihapus).
+
+### 7. Tes lewat server lokal SEBELUM push
+
+Jangan langsung push tanpa dicoba dulu — jalankan server lokal:
+```powershell
+.\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8080
+```
+Buka `http://localhost:8080`, lalu coba tanya beberapa hal yang isinya berubah di SOP baru (mis. nomor pasal/prosedur yang memang diubah tahun ini). Pastikan jawaban & sumber halamannya benar. Kalau ada yang salah/aneh, kemungkinan besar penyebabnya di langkah 5 (masih ada PDF lama yang belum dihapus, atau PDF baru belum ke-index) — perbaiki lalu ulangi dari langkah 6.
+
+### 8. Push
+
+```bash
+git add dokumen/ data/vector_store/
+git commit -m "update: SOP tahun <isi tahun>"
+git push origin main
+```
+Kalau repo GitHub ini sudah terhubung ke project Vercel, push ke `main` otomatis memicu deploy baru — lihat [Deployment](#deployment). Tunggu build selesai di dashboard Vercel, lalu coba lagi di URL production untuk memastikan.
+
+### Command yang bisa dipakai
+
+| Command | Fungsi |
+|---|---|
+| `.\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8080` | Jalankan server lokal (development/testing) |
+| `python scripts/reindex.py` | Proses ulang **SEMUA** PDF di `dokumen/` → embed → **timpa total** `data/vector_store/`. Ini sekaligus berfungsi sebagai "hapus isi vector db lama" — tidak ada command hapus terpisah, karena reindex selalu full rebuild, bukan incremental |
+| `curl -X POST http://localhost:8080/admin/reindex -H "X-Admin-Key: ..."` | Sama seperti `reindex.py`, tapi lewat HTTP ke server yang sedang jalan. Hanya untuk dev lokal, **tidak bisa dipakai di Vercel** (lihat [Deployment](#deployment)) |
+| `pip install -r requirements.txt` | Install semua dependency Python |
+| `python -c "import secrets; print(secrets.token_hex(32))"` | Generate `ADMIN_KEY` baru yang aman |
 
 ## API endpoints
 
@@ -161,13 +299,6 @@ Response:
   "sources": [{"file": "ADART-OSUIMahawaditra-2022.pdf", "page": 5}]
 }
 ```
-
-## Updating documents
-
-1. Add/replace PDF files in `dokumen/`.
-2. Run `python scripts/reindex.py` locally (with `GEMINI_API_KEY` set) to regenerate `data/vector_store/vectors.npy` and `metadata.json` — this always does a full rebuild from every PDF in `dokumen/`; there's no partial/incremental update.
-3. Commit the updated PDF(s) **and** the regenerated `data/vector_store/` files together.
-4. Push/deploy — the new vector store ships as part of the normal deployment bundle, the same way `dokumen/` already does. There is no separate "upload to a database" step.
 
 ## Deployment
 

@@ -26,6 +26,7 @@ from app.config import (
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSION,
 )
+from app.rag.prompts import _neutralize_tags
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,12 @@ def run_indexing() -> dict[str, Any]:
         try:
             loader = PyPDFLoader(str(pdf_path))
             pages = loader.load()
+
+            # Netralkan tag pembatas prompt (<konteks_dokumen>, <pertanyaan_user>, dst.) kalau
+            # secara literal muncul di teks PDF, supaya dokumen yang "diracuni" tidak bisa
+            # menyamar sebagai instruksi sistem saat teks ini dikutip ke dalam prompt LLM nanti.
+            for page_doc in pages:
+                page_doc.page_content = _neutralize_tags(page_doc.page_content)
 
             pasal_chunks = _split_pasal_aware(pages, file_name)
             if pasal_chunks is not None:

@@ -10,7 +10,7 @@ from typing import Any
 from google import genai
 from google.genai import types as genai_types
 
-from app.config import GEMINI_API_KEY, LLM_MODEL
+from app.config import GEMINI_API_KEY, LLM_MODEL, MAX_QUESTION_LENGTH
 from app.rag.retrieval import retrieve_context
 from app.rag.prompts import build_prompt, build_rewrite_prompt
 
@@ -113,7 +113,7 @@ def _rewrite_query_for_retrieval(question: str, history: list[dict] | None) -> s
                 max_output_tokens=150,
             ),
         )
-        rewritten = (response.text or "").strip()
+        rewritten = (response.text or "").strip()[:MAX_QUESTION_LENGTH]
         if rewritten:
             logger.debug(f"Query rewrite: '{question}' -> '{rewritten}'")
             return rewritten

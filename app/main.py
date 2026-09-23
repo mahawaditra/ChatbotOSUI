@@ -8,18 +8,28 @@ Endpoints:
     POST /admin/reindex → Reindex semua dokumen PDF
 """
 
+import hmac
 import json
 import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
+from upstash_ratelimit.asyncio import Ratelimit, SlidingWindow
+from upstash_redis.asyncio import Redis
 
-from app.config import ADMIN_KEY, LLM_MODEL
+from app.config import (
+    ADMIN_KEY,
+    LLM_MODEL,
+    MAX_QUESTION_LENGTH,
+    RATE_LIMIT_REQUESTS,
+    RATE_LIMIT_WINDOW_SECONDS,
+)
 from app.rag.chain import get_answer, RATE_LIMIT_MESSAGE
 from app.rag.indexing import run_indexing
 
@@ -54,9 +64,44 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if DOKUMEN_DIR.exists():
     app.mount("/dokumen", StaticFiles(directory=str(DOKUMEN_DIR)), name="dokumen")
 
-# Batas panjang input
-MAX_QUESTION_LENGTH = 500
+# Batas panjang input riwayat chat (MAX_QUESTION_LENGTH untuk `message` ada di app/config.py)
 MAX_HISTORY_ITEM_LENGTH = 800
+MAX_HISTORY_ITEMS = 6  # cermin dari MAX_HISTORY*2 di frontend (app/static/index.html)
+
+# Rate limiter per-IP untuk /api/chat, disimpan di Upstash Redis (bukan in-memory) supaya
+# tetap benar walau di-deploy sebagai serverless function (tiap invocation bisa instance baru
+# tanpa shared memory — in-memory counter akan reset/tidak konsisten antar instance).
+_chat_ratelimit = Ratelimit(
+    redis=Redis.from_env(),
+    limiter=SlidingWindow(max_requests=RATE_LIMIT_REQUESTS, window=RATE_LIMIT_WINDOW_SECONDS),
+    prefix="ratelimit:chat",
+)
+
+
+def _get_client_ip(http_request: Request) -> str:
+    """IP asli client di belakang proxy (Vercel/Render mengisi X-Forwarded-For)."""
+    forwarded = http_request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return http_request.client.host if http_request.client else "unknown"
+
+
+def _is_origin_allowed(http_request: Request) -> bool:
+    """
+    Tolak request lintas-situs dari browser (Origin header ada tapi host-nya beda dari host
+    request ini sendiri). Dicek terhadap host request sendiri (bukan daftar domain hardcoded)
+    supaya otomatis cocok di domain produksi maupun preview URL Vercel mana pun.
+    Origin yang tidak ada (banyak client non-browser/same-origin yang wajar) dianggap lolos —
+    rate limiting adalah lapisan pertahanan berikutnya untuk trafik non-browser.
+    """
+    origin = http_request.headers.get("origin")
+    if not origin:
+        return True
+    try:
+        origin_host = urlparse(origin).hostname
+    except ValueError:
+        return False
+    return origin_host == http_request.url.hostname
 
 
 # --- Pydantic models ---
@@ -80,7 +125,10 @@ class HistoryItem(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    history: list[HistoryItem] = []  # Riwayat chat dari frontend
+    # Riwayat chat dari frontend — dibatasi max_length supaya tidak bisa dipakai untuk
+    # menggembungkan ukuran prompt/biaya panggilan LLM secara sewenang-wenang (frontend
+    # sendiri sudah membatasi ke jumlah yang sama, ini adalah penegakan sisi server-nya).
+    history: list[HistoryItem] = Field(default_factory=list, max_length=MAX_HISTORY_ITEMS)
 
     @field_validator('message')
     @classmethod
@@ -155,20 +203,42 @@ async def health_check():
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(chat_request: ChatRequest, http_request: Request):
     """
     Endpoint utama chatbot RAG.
     Menerima pertanyaan user dan mengembalikan jawaban beserta sumber dokumen.
     """
-    if not request.message.strip():
+    if not chat_request.message.strip():
         raise HTTPException(status_code=422, detail="Pertanyaan tidak boleh kosong.")
+
+    if not _is_origin_allowed(http_request):
+        raise HTTPException(status_code=403, detail="Origin tidak diizinkan.")
+
+    client_ip = _get_client_ip(http_request)
+    try:
+        rl_allowed = (await _chat_ratelimit.limit(client_ip)).allowed
+    except Exception as e:
+        # Fail-open: kalau Upstash Redis sendiri bermasalah/salah konfigurasi, jangan sampai
+        # itu membuat seluruh /api/chat down untuk semua orang — itu risiko yang lebih besar
+        # daripada sementara tidak ada rate limiting.
+        logger.warning(f"Rate limiter error, melewatkan pengecekan rate limit: {e}")
+        rl_allowed = True
+
+    if not rl_allowed:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "answer": "Terlalu banyak permintaan. Silakan coba lagi sebentar lagi.",
+                "sources": [],
+            },
+        )
 
     start_time = time.perf_counter()
     status = "success"
 
     try:
-        history = [{"role": h.role, "content": h.content} for h in request.history]
-        result = get_answer(request.message, history=history)
+        history = [{"role": h.role, "content": h.content} for h in chat_request.history]
+        result = get_answer(chat_request.message, history=history)
         answer = result["answer"]
         sources = result["sources"]
 
@@ -196,7 +266,7 @@ async def chat(request: ChatRequest):
     finally:
         latency_ms = (time.perf_counter() - start_time) * 1000
         _log_request(
-            question=request.message,
+            question=chat_request.message,
             answer=locals().get("answer", ""),
             sources=locals().get("sources", []),
             latency_ms=latency_ms,
@@ -211,7 +281,7 @@ async def reindex(x_admin_key: str = Header(None)):
     Endpoint admin untuk reindex semua dokumen PDF.
     Membutuhkan header X-Admin-Key yang sesuai dengan ADMIN_KEY di environment.
     """
-    if x_admin_key != ADMIN_KEY:
+    if not hmac.compare_digest(x_admin_key or "", ADMIN_KEY):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     logger.info("Reindex dimulai oleh admin...")
@@ -222,11 +292,8 @@ async def reindex(x_admin_key: str = Header(None)):
 
     except FileNotFoundError as e:
         logger.error(f"Reindex gagal - file tidak ditemukan: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")
 
     except Exception as e:
         logger.error(f"Reindex gagal: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"status": "error", "message": str(e)},
-        )
+        raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")

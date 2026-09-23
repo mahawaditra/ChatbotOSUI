@@ -17,8 +17,21 @@ GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]
 UPSTASH_VECTOR_REST_URL: str = os.environ["UPSTASH_VECTOR_REST_URL"]
 UPSTASH_VECTOR_REST_TOKEN: str = os.environ["UPSTASH_VECTOR_REST_TOKEN"]
 
+# --- Upstash Redis (dipakai khusus untuk rate limiting /api/chat, database terpisah
+# dari Upstash Vector di atas — buat database Redis baru di dashboard Upstash) ---
+UPSTASH_REDIS_REST_URL: str = os.environ["UPSTASH_REDIS_REST_URL"]
+UPSTASH_REDIS_REST_TOKEN: str = os.environ["UPSTASH_REDIS_REST_TOKEN"]
+
 # --- Admin ---
 ADMIN_KEY: str = os.environ["ADMIN_KEY"]
+# Minimal 32 karakter (generator resmi di README/CLAUDE.md pakai secrets.token_hex(32) -> 64 hex
+# char) — mencegah ADMIN_KEY kosong/lemah lolos begitu saja tanpa ketahuan sampai ada yang coba
+# bypass /admin/reindex dengan header X-Admin-Key kosong.
+if len(ADMIN_KEY) < 32:
+    raise RuntimeError(
+        "ADMIN_KEY terlalu pendek atau kosong (minimal 32 karakter). "
+        "Generate dengan: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
 
 # --- Nama koleksi / namespace Upstash (opsional, default: org-rag) ---
 COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "org-rag")
@@ -59,3 +72,8 @@ SIMILARITY_THRESHOLD: float = 0.5
 LLM_MODEL: str = "gemini-3.1-flash-lite"
 EMBEDDING_MODEL: str = "gemini-embedding-001"
 EMBEDDING_DIMENSION: int = 1536  # Upstash free tier max, gemini-embedding-001 support truncation
+
+# --- Batas input & rate limiting /api/chat ---
+MAX_QUESTION_LENGTH: int = 500
+RATE_LIMIT_REQUESTS: int = 10  # jumlah request maksimum per IP per jendela waktu di bawah
+RATE_LIMIT_WINDOW_SECONDS: int = 60

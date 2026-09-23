@@ -21,6 +21,13 @@ COPY dokumen/ ./dokumen/
 # Copy Logo untuk web interface
 COPY Logo.png ./Logo.png
 
+# Jangan jalankan sebagai root di container. Folder logs/ dibuat & di-chown lebih dulu supaya
+# _log_request() di app/main.py tetap bisa menulis setelah pindah ke user non-root ini.
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && mkdir -p /app/logs \
+    && chown -R appuser:appuser /app
+USER appuser
+
 # Expose port 8080 (standar Render)
 EXPOSE 8080
 

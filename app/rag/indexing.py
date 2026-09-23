@@ -1,5 +1,5 @@
 """
-Modul indexing: memproses PDF → chunks → embed → simpan ke Upstash Vector.
+Modul indexing: memproses PDF → chunks → embed → simpan ke vector store lokal.
 Menggunakan REST API v1 langsung untuk embedding (text-embedding-004 hanya ada di v1, bukan v1beta).
 """
 
@@ -13,12 +13,9 @@ from typing import Any
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from upstash_vector import Index
 
 from app.config import (
     GEMINI_API_KEY,
-    UPSTASH_VECTOR_REST_URL,
-    UPSTASH_VECTOR_REST_TOKEN,
     DOKUMEN_DIR,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
@@ -27,6 +24,7 @@ from app.config import (
     EMBEDDING_DIMENSION,
 )
 from app.rag.prompts import _neutralize_tags
+from app.rag.vector_store import save as save_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -48,21 +46,6 @@ _PASAL_SPLITTER = RecursiveCharacterTextSplitter(
     chunk_overlap=CHUNK_OVERLAP,
     separators=["\n\n", "\n", ". ", " ", ""],
 )
-
-
-def get_vector_index() -> Index:
-    """Membuat koneksi ke Upstash Vector Index."""
-    return Index(
-        url=UPSTASH_VECTOR_REST_URL,
-        token=UPSTASH_VECTOR_REST_TOKEN,
-    )
-
-
-def delete_all_vectors(index: Index) -> None:
-    """Menghapus semua vektor lama sebelum reindex."""
-    logger.info("Menghapus semua vektor lama dari Upstash...")
-    index.reset()
-    logger.info("Semua vektor berhasil dihapus.")
 
 
 # Reindex memanggil embed API ratusan kali berturut-turut (satu per chunk), jadi butuh
@@ -190,7 +173,7 @@ def run_indexing() -> dict[str, Any]:
     1. Scan semua PDF di folder dokumen/
     2. Load dan split setiap PDF menjadi chunks
     3. Embed setiap chunk dengan Gemini
-    4. Simpan ke Upstash Vector
+    4. Simpan ke vector store lokal (data/vector_store/)
 
     Returns:
         Dict berisi total_chunks_indexed dan files_processed
@@ -207,12 +190,6 @@ def run_indexing() -> dict[str, Any]:
         chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
-
-    # Koneksi ke Upstash
-    index = get_vector_index()
-
-    # Hapus vektor lama
-    delete_all_vectors(index)
 
     all_chunks = []
     files_processed = []
@@ -253,9 +230,14 @@ def run_indexing() -> dict[str, Any]:
             logger.error(f"Gagal memproses {file_name}: {e}")
             raise
 
-    logger.info(f"Total chunks: {len(all_chunks)}. Mulai embedding dan upload ke Upstash...")
+    logger.info(f"Total chunks: {len(all_chunks)}. Mulai embedding...")
 
-    # Embed dan upload ke Upstash dalam batch
+    # Embed tiap chunk, ditampung di memori sampai akhir (bukan streaming ke store per-batch)
+    # — korpus ini kecil (ratusan chunk), aman ditampung sekaligus sebelum satu kali tulis
+    # ke vector store lokal lewat save_vector_store() di bawah.
+    all_vectors: list[list[float]] = []
+    all_metadatas: list[dict] = []
+
     BATCH_SIZE = 20  # lebih kecil karena embed 1 per 1
     for i in range(0, len(all_chunks), BATCH_SIZE):
         batch = all_chunks[i : i + BATCH_SIZE]
@@ -265,22 +247,18 @@ def run_indexing() -> dict[str, Any]:
         # Embed teks
         vectors = embed_texts(texts)
 
-        # Siapkan data untuk Upstash
-        upsert_data = [
+        all_vectors.extend(vectors)
+        all_metadatas.extend(
             {
-                "id": f"chunk-{i + j}",
-                "vector": vectors[j],
-                "metadata": {
-                    "text": texts[j],
-                    "file": metadatas[j].get("file", "unknown"),
-                    "page": metadatas[j].get("page", 0),
-                },
+                "text": texts[j],
+                "file": metadatas[j].get("file", "unknown"),
+                "page": metadatas[j].get("page", 0),
             }
             for j in range(len(batch))
-        ]
+        )
+        logger.info(f"  Batch {i // BATCH_SIZE + 1}: {len(batch)} chunks di-embed.")
 
-        index.upsert(vectors=upsert_data)
-        logger.info(f"  Batch {i // BATCH_SIZE + 1}: {len(batch)} chunks di-upload.")
+    save_vector_store(all_vectors, all_metadatas)
 
     logger.info("Indexing selesai!")
     return {

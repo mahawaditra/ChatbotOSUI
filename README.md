@@ -29,7 +29,7 @@ This is also the author's first hands-on project exploring RAG. Some of the retr
 
 **Admin:**
 1. Add or replace PDF files in `dokumen/`.
-2. Call `POST /admin/reindex` with the admin key to rebuild the entire vector index (always a full rebuild — see [Known Limitations](#known-limitations)).
+2. Rebuild the entire local vector store (always a full rebuild — see [Known Limitations](#known-limitations)) and commit the result — see [Updating documents](#updating-documents).
 
 ## Tech stack
 
@@ -39,19 +39,19 @@ This is also the author's first hands-on project exploring RAG. Some of the retr
 | Frontend | Single-page vanilla HTML/CSS/JS, served directly by FastAPI — no separate frontend framework or build step |
 | LLM (answers) | Google Gemini, via the `google-genai` SDK. Model set by `LLM_MODEL` in `app/config.py` |
 | Embeddings | Google Gemini embedding model, called via **raw REST** rather than the SDK (see comments in `app/rag/retrieval.py` / `app/rag/indexing.py` — the SDK's `v1beta` path didn't support the embedding model this project needs). Configured via `EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` in `app/config.py` |
-| Vector database | [Upstash Vector](https://upstash.com/docs/vector) (serverless, REST-based) |
+| Vector database | Local — a `numpy` array (`data/vector_store/vectors.npy`) + JSON metadata, committed straight to this git repo. No cloud vector DB account required; see [How it works](#how-it-works) |
 | PDF processing | [LangChain](https://python.langchain.com/) (`PyPDFLoader` + `RecursiveCharacterTextSplitter`), plus a custom structure-aware chunker for AD/ART-style documents (see below) |
 
 ## How it works
 
-### Indexing (`POST /admin/reindex`, full rebuild)
+### Indexing (`python scripts/reindex.py`, full rebuild — see [Deployment](#deployment))
 1. Every PDF in `dokumen/` is loaded page by page.
 2. Documents that follow a `"Pasal <N>"` article structure (currently the AD/ART) are split along those article boundaries instead of by raw character count, so a single article isn't cut in half mid-sentence. Documents without that structure (the SOPs) fall back to standard character-based chunking.
-3. Each chunk is embedded individually via the Gemini embedding API (with automatic retry/backoff on rate limits) and upserted into Upstash Vector. **The entire existing index is wiped first** (`index.reset()`) — there is no incremental/per-document update.
+3. Each chunk is embedded individually via the Gemini embedding API (with automatic retry/backoff on rate limits) and written to the local vector store (`app/rag/vector_store.py`). **The entire existing store is overwritten** — there is no incremental/per-document update.
 
 ### Answering a question (`POST /api/chat`)
 1. If there's prior conversation history, the question is first rewritten by the LLM into a standalone query (so "terus kalau resign gimana?" keeps referring to whatever was being discussed).
-2. That query is embedded and used to fetch a wider pool of candidate chunks from Upstash than what's actually needed (see `RETRIEVAL_FETCH_K` in [Known Limitations](#known-limitations)), which are then filtered by a minimum similarity score and trimmed down to the top few.
+2. That query is embedded and used to fetch a wider pool of candidate chunks from the local vector store than what's actually needed (see `RETRIEVAL_FETCH_K` in [Known Limitations](#known-limitations) — a leftover from the old Upstash-based search, kept as-is for now even though exact local search no longer strictly needs it), which are then filtered by a minimum similarity score and trimmed down to the top few.
 3. If nothing relevant survives that filter, the bot returns a refusal message **without calling the LLM at all** — saves cost/latency and avoids answering from irrelevant context.
 4. Otherwise, the surviving chunks, the original question, and recent history are assembled into a prompt — with document context, user input, and history each wrapped in separate tags as a prompt-injection guard — and sent to Gemini.
 5. The answer is returned with a deduplicated list of sources (file + page).
@@ -78,10 +78,11 @@ cp .env.example .env
 | Variable | Required | Description |
 |---|---|---|
 | `GEMINI_API_KEY` | yes | Google AI Studio API key |
-| `UPSTASH_VECTOR_REST_URL` | yes | Upstash Vector REST endpoint |
-| `UPSTASH_VECTOR_REST_TOKEN` | yes | Upstash Vector REST token |
+| `UPSTASH_REDIS_REST_URL` | yes | Upstash Redis REST endpoint — rate limiting only, unrelated to the vector store |
+| `UPSTASH_REDIS_REST_TOKEN` | yes | Upstash Redis REST token |
 | `ADMIN_KEY` | yes | Shared secret required by `POST /admin/reindex` |
-| `COLLECTION_NAME` | no (default `org-rag`) | Currently unused by the code — reserved for future Upstash namespacing |
+
+The local vector store (`data/vector_store/`) needs no credentials at all — it's just files committed to this repo.
 
 Generate a secure `ADMIN_KEY`:
 ```bash
@@ -98,7 +99,9 @@ Open `http://localhost:8080` in your browser.
 
 ### 4. Index your documents (required before first use, and after any document change)
 
-This wipes and rebuilds the **entire** vector index. With more/larger documents this can take a couple of minutes, since each chunk is embedded one at a time with automatic retry on rate limits.
+This overwrites the **entire** local vector store (`data/vector_store/`). With more/larger documents this can take a couple of minutes, since each chunk is embedded one at a time with automatic retry on rate limits.
+
+For local dev, either call the admin endpoint:
 
 **macOS / Linux / Git Bash:**
 ```bash
@@ -116,7 +119,14 @@ curl.exe -X POST http://localhost:8080/admin/reindex -H "X-Admin-Key: YOUR_ADMIN
 
 Replace `YOUR_ADMIN_KEY` with the actual value from your `.env` file directly. Don't rely on shell variable expansion (`$ADMIN_KEY` in bash, `$env:ADMIN_KEY` in PowerShell) unless you've explicitly set it in that same terminal session — `.env` is only loaded by the Python process, not by your shell.
 
-A successful response looks like:
+...or run the standalone script directly (no running server needed):
+```bash
+python scripts/reindex.py
+```
+
+Either way, this writes `data/vector_store/vectors.npy` + `metadata.json` to disk — **remember to commit those files** (see [Updating documents](#updating-documents)).
+
+A successful response/output looks like:
 ```json
 {"status": "success", "total_chunks_indexed": 246, "files_processed": ["ADART-OSUIMahawaditra-2022.pdf", "SOP-Divisi-Acara-2026.pdf", "..."]}
 ```
@@ -128,7 +138,7 @@ A successful response looks like:
 | `GET` | `/` | Web chat interface |
 | `GET` | `/health` | Health check |
 | `POST` | `/api/chat` | Ask the chatbot a question |
-| `POST` | `/admin/reindex` | Rebuild the entire vector index (requires `X-Admin-Key` header) |
+| `POST` | `/admin/reindex` | Rebuild the entire local vector store (requires `X-Admin-Key` header). Only works when the filesystem is writable — see [Deployment](#deployment) |
 
 ### Example: asking a question
 
@@ -155,8 +165,9 @@ Response:
 ## Updating documents
 
 1. Add/replace PDF files in `dokumen/`.
-2. Redeploy, so the running instance has the new files.
-3. Call `POST /admin/reindex` again — this always does a full rebuild; there's no partial/incremental update.
+2. Run `python scripts/reindex.py` locally (with `GEMINI_API_KEY` set) to regenerate `data/vector_store/vectors.npy` and `metadata.json` — this always does a full rebuild from every PDF in `dokumen/`; there's no partial/incremental update.
+3. Commit the updated PDF(s) **and** the regenerated `data/vector_store/` files together.
+4. Push/deploy — the new vector store ships as part of the normal deployment bundle, the same way `dokumen/` already does. There is no separate "upload to a database" step.
 
 ## Deployment
 
@@ -165,22 +176,22 @@ The deployment target has changed a couple of times during development. **The cu
 - **Entrypoint** — Vercel auto-detects a `FastAPI` instance named `app` at `app/main.py`, which this repo already has. No adapter/shim needed.
 - **Runtime version** — pinned via `.python-version` (`3.12`, Vercel's current default) so the deployed runtime doesn't silently drift if Vercel's own default changes later.
 - **`vercel.json`** sets `maxDuration` for the `/api/chat` path. It's deliberately *not* stretched to cover a full reindex — Hobby's duration ceiling can't fit that regardless of configuration.
-- **Reindexing does not go through the deployed endpoint on Hobby.** `/admin/reindex` can take a couple of minutes (chunks are embedded one at a time, with retries), which exceeds Hobby's function time limit no matter how it's configured. Use `scripts/reindex.py` instead — it calls the same `run_indexing()` directly against Upstash + Gemini, bypassing Vercel (and its duration limit) entirely:
+- **Reindexing does not go through the deployed endpoint on Hobby — and can't, at all, once deployed.** Two independent reasons: `/admin/reindex` can take a couple of minutes (chunks are embedded one at a time, with retries), which exceeds Hobby's function time limit no matter how it's configured; and more fundamentally, Vercel's filesystem is **read-only outside `/tmp`**, so even a fast reindex couldn't durably write `data/vector_store/` from a running Vercel instance. Use `scripts/reindex.py` instead — it calls the same `run_indexing()` directly, writing the local vector store to disk without going through Vercel (or any network vector DB) at all:
   ```bash
   python scripts/reindex.py
   ```
-  Run it with the **production** credentials in scope (e.g. a `.env` pointed at the production Upstash index) whenever `dokumen/` changes. `/admin/reindex` still works for local dev via `uvicorn`, just isn't relied on once deployed.
-- **Static & document serving needs no code changes.** Vercel's FastAPI integration auto-promotes `app.mount(..., StaticFiles(...))` directories (`/static`, `/dokumen`) to its CDN while *also* keeping them in the function bundle by default — which is exactly what's needed here, since `run_indexing()` reads `dokumen/*.pdf` from disk at runtime, not just serves it statically. (`dokumen/` is ~3.8MB total, nowhere near Vercel's 500MB bundle limit.)
-- **Environment variables** (`GEMINI_API_KEY`, `UPSTASH_VECTOR_REST_URL`, `UPSTASH_VECTOR_REST_TOKEN`, `ADMIN_KEY`, `COLLECTION_NAME`) need to be set in the Vercel project's dashboard (Settings → Environment Variables) or via `vercel env add` — this is account-side and can't be done from a config file in this repo.
+  Run it locally whenever `dokumen/` changes (it only needs `GEMINI_API_KEY`), then **commit `data/vector_store/` and redeploy** — the regenerated files ship as part of the deployment bundle. `/admin/reindex` still works for local dev via `uvicorn` (writing straight into your working tree), it's just not usable once deployed.
+- **Static & document serving needs no code changes.** Vercel's FastAPI integration auto-promotes `app.mount(..., StaticFiles(...))` directories (`/static`, `/dokumen`) to its CDN while *also* keeping them in the function bundle by default — which is exactly what's needed here, since `run_indexing()` reads `dokumen/*.pdf` from disk at runtime, not just serves it statically. (`dokumen/` is ~3.8MB total, nowhere near Vercel's 500MB bundle limit.) `data/vector_store/` is a plain committed directory read the same way at runtime by `app/rag/vector_store.py`, so it's expected to be included in the bundle the same way — worth a one-time check against an actual Vercel deploy to confirm.
+- **Environment variables** (`GEMINI_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `ADMIN_KEY`) need to be set in the Vercel project's dashboard (Settings → Environment Variables) or via `vercel env add` — this is account-side and can't be done from a config file in this repo. No vector-DB credentials are needed at all anymore.
 - A real bug this surfaced: `app/main.py` used to create `logs/` unconditionally at import time with no error handling. On Vercel's read-only-outside-`/tmp` filesystem that would have crashed the app at cold start, not just silently dropped logging — it's now wrapped in `try/except` so a failure there just disables file-based logging instead. Per-request JSON logs (`logs/*.json`) still won't persist on Vercel either way; regular `logging` calls (already used throughout) show up fine in Vercel's Function Logs regardless.
 
 *(Historical note, in case old instructions resurface: the `Dockerfile` in this repo targets Railway's injected `PORT` env var, and an earlier version of this README documented deploying to Render. Neither is used by the Vercel path — Vercel builds directly from source for a recognized Python framework and ignores the `Dockerfile` entirely.)*
 
 ## Known limitations
 
-- **Indexing is always a full rebuild.** There's no per-document delete/update — every `/admin/reindex` call re-processes and re-embeds all PDFs in `dokumen/`.
+- **Indexing is always a full rebuild.** There's no per-document delete/update — every reindex re-processes and re-embeds all PDFs in `dokumen/` and overwrites the entire local vector store.
 - **`SIMILARITY_THRESHOLD`** (`app/config.py`) is a starting value, not a calibrated one. If valid answers start getting filtered out (threshold too high) or clearly off-topic questions still get answered (threshold too low), it needs adjusting against real query logs.
-- **`RETRIEVAL_FETCH_K` intentionally over-fetches** from Upstash before trimming down to `TOP_K`. This is a workaround, not a stylistic choice: Upstash's approximate nearest-neighbor search was found empirically to be unreliable at very small `top_k` values on this corpus (similarity scores across chunks cluster very tightly), occasionally missing the single most relevant chunk entirely when asked for only the top 5.
+- **`RETRIEVAL_FETCH_K` intentionally over-fetches** before trimming down to `TOP_K`. This is a leftover from when retrieval ran against Upstash Vector: Upstash's approximate nearest-neighbor search was found empirically to be unreliable at very small `top_k` values on this corpus (similarity scores across chunks cluster very tightly), occasionally missing the single most relevant chunk entirely when asked for only the top 5. The local vector store does an exact (brute-force) cosine similarity search, so it doesn't have this problem — `RETRIEVAL_FETCH_K` is kept as-is for now rather than bundling a behavior change into the storage migration, but could likely be reduced.
 - **Gemini free-tier rate limits apply.** Live chat answers retry once before returning a "please try again" message; indexing retries several times with exponential backoff, but sustained rate limiting will still surface as an error.
 
 ## No test suite

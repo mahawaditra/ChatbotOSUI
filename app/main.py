@@ -294,6 +294,17 @@ async def reindex(x_admin_key: str = Header(None)):
         logger.error(f"Reindex gagal - file tidak ditemukan: {e}")
         raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")
 
+    except (OSError, PermissionError) as e:
+        logger.error(f"Reindex gagal - tidak bisa menulis vector store lokal: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Reindex gagal: tidak bisa menulis vector store lokal (kemungkinan filesystem "
+                "read-only di instance ini, mis. Vercel). Jalankan `python scripts/reindex.py` "
+                "secara lokal, lalu commit dan deploy ulang hasilnya."
+            ),
+        )
+
     except Exception as e:
         logger.error(f"Reindex gagal: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Reindex gagal. Periksa log server untuk detail.")

@@ -1,18 +1,19 @@
 """
 Reindex mandiri — memanggil app.rag.indexing.run_indexing() langsung tanpa lewat HTTP.
 
-Dipakai sebagai jalur reindex utama untuk instance production di Vercel: script ini
-bicara langsung ke Upstash + Gemini, bukan ke aplikasi yang di-deploy, jadi tidak
-terikat batas durasi Vercel Function sama sekali (yang di plan Hobby jauh lebih pendek
-dari waktu reindex kita).
+Dipakai sebagai jalur reindex utama untuk instance production di Vercel. Alasan
+utamanya BUKAN LAGI cuma batas durasi Vercel Function (walau itu tetap benar):
+filesystem Vercel read-only di luar /tmp, jadi proses yang berjalan di sana tidak bisa
+menulis data/vector_store/vectors.npy + metadata.json secara permanen. Vector store
+lokal harus di-generate di sini, lalu di-commit ke git dan di-deploy ulang seperti file
+kode biasa — lihat README.md bagian "Updating documents" / "Deployment".
 
 Penggunaan:
     python scripts/reindex.py
 
-Pastikan .env (atau environment variable) sudah berisi GEMINI_API_KEY,
-UPSTASH_VECTOR_REST_URL, dan UPSTASH_VECTOR_REST_TOKEN yang sesuai target
-(lokal atau production) SEBELUM menjalankan ini — script ini akan menghapus
-total index yang ditunjuk kredensial tersebut lalu membangunnya ulang.
+Pastikan .env (atau environment variable) sudah berisi GEMINI_API_KEY yang valid
+SEBELUM menjalankan ini — script ini akan menimpa total data/vector_store/vectors.npy
+dan metadata.json dengan hasil reindex penuh dari seluruh PDF di dokumen/.
 """
 
 import sys

@@ -18,6 +18,11 @@ COPY app/ ./app/
 # Copy dokumen PDF ke dalam image
 COPY dokumen/ ./dokumen/
 
+# Copy vector store lokal (vectors.npy + metadata.json) — hasil `python scripts/reindex.py`,
+# di-commit ke git seperti dokumen/. Jalur ini legacy/tidak dipakai di produksi (lihat
+# README), tapi disertakan supaya tidak diam-diam rusak kalau ada yang pakai Docker.
+COPY data/ ./data/
+
 # Copy Logo untuk web interface
 COPY Logo.png ./Logo.png
 

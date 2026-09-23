@@ -44,7 +44,7 @@ def get_answer(question: str, history: list[dict] | None = None) -> dict[str, An
     # 1. Rewrite pertanyaan jadi standalone query untuk retrieval (hanya jika ada history)
     retrieval_query = _rewrite_query_for_retrieval(question, history)
 
-    # 2. Retrieve context dari Upstash Vector
+    # 2. Retrieve context dari vector store lokal
     chunks = retrieve_context(retrieval_query)
 
     if not chunks:

@@ -13,12 +13,8 @@ load_dotenv()
 # --- Google AI Studio ---
 GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]
 
-# --- Upstash Vector ---
-UPSTASH_VECTOR_REST_URL: str = os.environ["UPSTASH_VECTOR_REST_URL"]
-UPSTASH_VECTOR_REST_TOKEN: str = os.environ["UPSTASH_VECTOR_REST_TOKEN"]
-
-# --- Upstash Redis (dipakai khusus untuk rate limiting /api/chat, database terpisah
-# dari Upstash Vector di atas — buat database Redis baru di dashboard Upstash) ---
+# --- Upstash Redis (dipakai khusus untuk rate limiting /api/chat — database terpisah
+# dari vector store lokal di bawah, buat database Redis baru di dashboard Upstash) ---
 UPSTASH_REDIS_REST_URL: str = os.environ["UPSTASH_REDIS_REST_URL"]
 UPSTASH_REDIS_REST_TOKEN: str = os.environ["UPSTASH_REDIS_REST_TOKEN"]
 
@@ -33,12 +29,14 @@ if len(ADMIN_KEY) < 32:
         "Generate dengan: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 
-# --- Nama koleksi / namespace Upstash (opsional, default: org-rag) ---
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "org-rag")
-
 # --- Path folder dokumen PDF ---
 # Di container Docker, dokumen/ ada di root project (/app/dokumen)
 DOKUMEN_DIR: Path = Path(__file__).parent.parent / "dokumen"
+
+# --- Path folder vector store lokal (vectors.npy + metadata.json) ---
+# Di-generate oleh scripts/reindex.py dan di-commit ke git, supaya proyek tidak
+# bergantung pada akun cloud siapa pun untuk vector search.
+VECTOR_STORE_DIR: Path = Path(__file__).parent.parent / "data" / "vector_store"
 
 # --- RAG settings ---
 CHUNK_SIZE: int = 1000
@@ -55,23 +53,28 @@ PASAL_CHUNK_SIZE: int = 2000
 
 TOP_K: int = 5  # jumlah chunk maksimum yang akhirnya masuk ke prompt LLM
 
-# Jumlah kandidat yang diminta ke Upstash SEBELUM dipangkas ke TOP_K.
-# WAJIB lebih besar dari TOP_K: diverifikasi empiris bahwa approximate nearest-neighbor
-# search Upstash pada corpus ini (skor antar chunk sangat rapat, ~0.75-0.81) baru stabil
-# menemukan hasil #1 yang benar mulai top_k>=20 — top_k=5/10 langsung ke Upstash bisa
-# melewatkan chunk paling relevan sama sekali. Filter SIMILARITY_THRESHOLD & pemangkasan
-# ke TOP_K dilakukan setelah fetch ini, di retrieval.py.
+# Jumlah kandidat yang diambil dari vector store SEBELUM dipangkas ke TOP_K.
+# Peninggalan dari era Upstash: approximate nearest-neighbor search Upstash pada corpus
+# ini (skor antar chunk sangat rapat, ~0.75-0.81) baru stabil menemukan hasil #1 yang
+# benar mulai top_k>=20 — top_k=5/10 langsung ke Upstash bisa melewatkan chunk paling
+# relevan sama sekali. Vector store lokal (numpy, exact search) tidak punya masalah ini,
+# tapi nilai ini sengaja dipertahankan apa adanya untuk saat ini. Filter
+# SIMILARITY_THRESHOLD & pemangkasan ke TOP_K dilakukan setelah fetch ini, di retrieval.py.
 RETRIEVAL_FETCH_K: int = 25
 
-# Skor similarity minimum (dari Upstash) agar sebuah chunk dianggap relevan.
-# Nilai awal, perlu dikalibrasi berdasarkan skor asli di log produksi —
-# metrik similarity tergantung setting index Upstash (dibuat via dashboard, bukan di kode ini).
+# Skor similarity minimum agar sebuah chunk dianggap relevan. Skor dihitung sebagai cosine
+# similarity yang dinormalisasi ke rentang [0,1] via (1 + cosine_similarity) / 2 (formula
+# yang sama seperti skor yang dulu dikembalikan Upstash untuk metric COSINE) — lihat
+# app/rag/vector_store.py::query(). Nilai ini dikalibrasi terhadap skor ternormalisasi itu.
 SIMILARITY_THRESHOLD: float = 0.5
 
 # --- LLM settings ---
 LLM_MODEL: str = "gemini-3.1-flash-lite"
 EMBEDDING_MODEL: str = "gemini-embedding-001"
-EMBEDDING_DIMENSION: int = 1536  # Upstash free tier max, gemini-embedding-001 support truncation
+# Ukuran vektor embedding — JANGAN diubah tanpa reindex ulang total (data/vector_store/).
+# Vector store lokal tidak memvalidasi kecocokan dimensi antara vektor tersimpan dan query
+# baru; mismatch akan menghasilkan cosine similarity yang tidak berarti, bukan error.
+EMBEDDING_DIMENSION: int = 1536
 
 # --- Batas input & rate limiting /api/chat ---
 MAX_QUESTION_LENGTH: int = 500

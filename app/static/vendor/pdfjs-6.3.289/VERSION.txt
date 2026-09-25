@@ -1,14 +1,34 @@
 pdfjs-dist 6.3.289 (Apache-2.0, lihat LICENSE) — build "legacy" (mendukung Safari/Chrome yang lebih lama).
 Sumber: paket npm `pdfjs-dist@6.3.289`, diambil dengan `npm pack` (hash tarball diverifikasi npm terhadap registry):
   sha512-ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==
-File yang dipakai: legacy/build/pdf.min.mjs dan legacy/build/pdf.worker.min.mjs.
 
-Dipakai oleh viewer PDF di HP/tablet (app/static/index.html, fungsi pdfjs*). Di-load dinamis hanya saat
-sebuah PDF dibuka. Desktop memakai viewer bawaan browser (iframe) dan tidak memuat library ini.
+File di folder ini dan asalnya:
+  pdf.min.mjs, pdf.worker.min.mjs   <- legacy/build/  (inti PDF.js + worker)
+  pdf_viewer.mjs                    <- legacy/web/    (komponen viewer resmi: PDFViewer, PDFFindController, EventBus, ...)
+  pdf_viewer.css                    <- legacy/web/pdf_viewer.css, TAPI DIRATAKAN (lihat "CSS diratakan" di bawah)
+  images/loading-icon.gif           <- legacy/web/images/ (spinner halaman; satu-satunya gambar yang dipakai. CSS juga merujuk
+                                       sekitar 80 ikon editor/anotasi, tetapi fitur itu tidak dipakai, jadi tidak di-vendor)
+  LICENSE
+
+Dipakai oleh viewer PDF di HP/tablet (app/static/index.html, blok "Viewer PDF"). Di-load dinamis hanya saat sebuah PDF
+dibuka. Desktop memakai viewer bawaan browser (iframe) dan tidak memuat library ini.
+
+Urutan impor (WAJIB): pdf.min.mjs dulu, set `globalThis.pdfjsLib = <modul pdf.min.mjs>`, baru import pdf_viewer.mjs,
+karena pdf_viewer.mjs membaca globalThis.pdfjsLib saat dievaluasi.
+
+CSS diratakan: pdf_viewer.css asli memakai CSS nesting bawaan (Chrome >= 120, Safari/iOS >= 17.2). Di browser yang lebih
+lama kanvas halaman salah posisi, jadi file di sini adalah hasil `postcss-nesting` (tampilannya sudah dicek identik piksel
+demi piksel dengan CSS asli di Chrome). Cara membuatnya (di folder sementara, bukan di repo):
+  npm i postcss@8 postcss-nesting@13
+  node -e "const postcss=require('postcss'),n=require('postcss-nesting'),fs=require('fs');
+    postcss([n()]).process(fs.readFileSync('pdf_viewer.css','utf8'),{from:undefined}).then(r=>fs.writeFileSync('flat.css',r.css))"
+  lalu tambahkan satu baris komentar "DIRATAKAN ..." di paling atas hasilnya (seperti file yang ada sekarang).
+CSS ini juga mendefinisikan `.sidebar` dan `--sidebar-width` secara global; itu sebabnya drawer aplikasi bernama
+`.doc-drawer` / `--drawer-width`. Setelah upgrade, cek lagi nama kelas/variabel yang bentrok dengan index.html.
 
 Cara upgrade:
-  1. cd ke folder sementara, jalankan: npm pack pdfjs-dist@<versi-baru>
-  2. Ekstrak legacy/build/pdf.min.mjs, legacy/build/pdf.worker.min.mjs, dan LICENSE dari tarball
-  3. Simpan di folder BARU app/static/vendor/pdfjs-<versi-baru>/ (nama ber-versi wajib: file di
-     /static/vendor/ di-cache 1 tahun dan immutable, jadi isi folder lama tidak boleh ditimpa)
-  4. Ubah konstanta PDFJS_BASE di app/static/index.html ke folder baru, uji semua PDF, hapus folder lama
+  1. cd ke folder sementara, jalankan: npm pack pdfjs-dist@<versi-baru> dan ekstrak tarball-nya
+  2. Salin file-file di atas dari tarball ke folder BARU app/static/vendor/pdfjs-<versi-baru>/ (nama ber-versi wajib: file di
+     /static/vendor/ di-cache 1 tahun dan immutable, jadi isi folder lama tidak boleh ditimpa), ratakan CSS-nya
+  3. Ubah konstanta PDFJS_BASE di app/static/index.html ke folder baru
+  4. Uji semua PDF di HP (buka di halaman yang dikutip, scroll, cubit-zoom, cari), lalu hapus folder lama

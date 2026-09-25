@@ -12,6 +12,7 @@ import asyncio
 import hmac
 import json
 import logging
+import mimetypes
 import threading
 import time
 from datetime import datetime, timezone
@@ -43,6 +44,12 @@ from app.rag.indexing import run_indexing
 # dari app/config.py supaya mengimpor config lewat jalur lain (mis. scripts/reindex.py)
 # tidak ikut wajib menyediakan secret yang tidak dipakainya. Lihat app/config.py.
 validate_server_config()
+
+# StaticFiles menebak Content-Type dari tabel MIME sistem, yang di container Vercel tidak dijamin
+# memuat dua ekstensi ini. .mjs WAJIB text/javascript (browser menolak modul dengan MIME lain —
+# dipakai viewer PDF.js di app/static/vendor/), .webmanifest untuk "Tambah ke Layar Utama".
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # --- Setup logging ---
 logging.basicConfig(
@@ -198,6 +205,24 @@ class ChatGuardMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def _cache_control_for(path: str) -> str | None:
+    """
+    Cache-Control per jenis path. Tanpa ini Vercel memberi `max-age=0, must-revalidate` untuk semua
+    respons dari function, jadi tiap kunjungan (di HP: boros data + cold start) mengulang request
+    untuk logo, favicon, library PDF.js (~1,8 MB), dan PDF. Halaman `/` dan /api/* sengaja TIDAK
+    di-cache (None).
+    """
+    if path.startswith("/static/vendor/"):
+        # Folder ber-versi (mis. pdfjs-6.3.289): isinya tidak pernah berubah di bawah nama yang sama.
+        return "public, max-age=31536000, immutable"
+    if path.startswith("/static/") or path == "/manifest.webmanifest":
+        return "public, max-age=86400"
+    if path.startswith("/dokumen/"):
+        # Dokumen diganti tahunan dengan nama file yang bisa sama; ETag tetap merevalidasi setelah 1 jam.
+        return "public, max-age=3600"
+    return None
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Header keamanan standar di setiap response. HSTS tidak perlu ditambahkan manual —
     Vercel sudah menerapkannya otomatis untuk domain *.vercel.app maupun custom domain.
@@ -209,21 +234,36 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     pass ini. 'unsafe-inline' di script-src karena itu adalah kompromi sadar, bukan oversight:
     nilai keamanan CSP di sini tetap nyata lewat frame-ancestors (anti-clickjacking) dan
     membatasi origin eksternal yang boleh dimuat, walau tidak menutup total XSS berbasis script.
+
+    Pengecualian /dokumen/*.pdf: viewer PDF desktop memakai <iframe> same-origin. `X-Frame-Options:
+    DENY` + `frame-ancestors 'none'` memblokir framing bahkan oleh halaman kita sendiri (dulu bikin
+    viewer PDF di production kosong), jadi untuk path itu dipakai SAMEORIGIN. CSP tidak dikirim
+    sama sekali untuk PDF: ini dokumen statis (tanpa script), dan `default-src` di respons PDF bisa
+    mengganggu viewer bawaan browser. Clickjacking dari situs LAIN tetap tertutup oleh SAMEORIGIN.
     """
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+        path = request.url.path
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data:; "
-            "frame-ancestors 'none'"
-        )
+        if path.startswith("/dokumen/"):
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        else:
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' data:; "
+                "frame-ancestors 'none'"
+            )
+        # Hanya untuk respons sukses; jangan meng-cache 404/500 dan jangan menimpa header yang
+        # sudah diatur handler itu sendiri.
+        cache_control = _cache_control_for(path)
+        if cache_control and response.status_code in (200, 206) and "cache-control" not in response.headers:
+            response.headers["Cache-Control"] = cache_control
         return response
 
 
@@ -281,6 +321,7 @@ def _log_request(
     latency_ms: float,
     status: str,
     retrieval_query: str = "",
+    top_score: float | None = None,
 ) -> None:
     """Menyimpan log request ke file JSON harian."""
     log_entry = {
@@ -289,6 +330,9 @@ def _log_request(
         # Query standalone hasil query rewriting yang dipakai untuk retrieval — berguna untuk
         # mengecek manual apakah rewrite membantu pertanyaan lanjutan di percakapan multi-turn.
         "retrieval_query": retrieval_query,
+        # Skor similarity top-1 — bahan kalibrasi SIMILARITY_THRESHOLD dari trafik nyata
+        # (None untuk sapaan yang tidak melalui retrieval).
+        "top_score": None if top_score is None else round(top_score, 4),
         "answer_preview": answer[:100] + "..." if len(answer) > 100 else answer,
         "sources": [f"{s['file']} hal. {s['page']}" for s in sources],
         "chunks_retrieved": len(sources),
@@ -314,6 +358,15 @@ async def serve_logo():
     if not logo_path.exists():
         raise HTTPException(status_code=404, detail="Logo tidak ditemukan.")
     return FileResponse(str(logo_path), media_type="image/png")
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def serve_manifest():
+    """Manifest untuk "Tambah ke Layar Utama". Di root (bukan /static/) supaya scope "/" sah."""
+    manifest_path = STATIC_DIR / "manifest.webmanifest"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="Manifest tidak ditemukan.")
+    return FileResponse(str(manifest_path), media_type="application/manifest+json")
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -361,6 +414,11 @@ async def chat(chat_request: ChatRequest, http_request: Request):
                 content={"answer": answer, "sources": []},
             )
 
+        # "gated" (ditolak sebelum LLM) dan "smalltalk" dicatat apa adanya supaya bisa dihitung
+        # terpisah dari jawaban biasa ("success") saat mengevaluasi threshold.
+        if result.get("status") in ("gated", "smalltalk"):
+            status = result["status"]
+
         return ChatResponse(answer=answer, sources=sources)
 
     except Exception as e:
@@ -376,6 +434,7 @@ async def chat(chat_request: ChatRequest, http_request: Request):
 
     finally:
         latency_ms = (time.perf_counter() - start_time) * 1000
+        top_score = locals().get("result", {}).get("top_score")
         _log_request(
             question=chat_request.message,
             answer=locals().get("answer", ""),
@@ -383,6 +442,13 @@ async def chat(chat_request: ChatRequest, http_request: Request):
             latency_ms=latency_ms,
             status=status,
             retrieval_query=locals().get("result", {}).get("retrieval_query", ""),
+            top_score=top_score,
+        )
+        # Baris log TANPA teks pertanyaan/jawaban: di Vercel file log tidak persist, tapi stdout
+        # masuk Function Logs — cukup untuk memantau sebaran skor dan berapa banyak yang di-gate.
+        logger.info(
+            f"chat status={status} top_score={'-' if top_score is None else f'{top_score:.3f}'} "
+            f"sumber={len(locals().get('sources', []))} latency_ms={latency_ms:.0f}"
         )
 
 

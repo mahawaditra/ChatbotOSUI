@@ -1,0 +1,14 @@
+pdfjs-dist 6.3.289 (Apache-2.0, lihat LICENSE) — build "legacy" (mendukung Safari/Chrome yang lebih lama).
+Sumber: paket npm `pdfjs-dist@6.3.289`, diambil dengan `npm pack` (hash tarball diverifikasi npm terhadap registry):
+  sha512-ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==
+File yang dipakai: legacy/build/pdf.min.mjs dan legacy/build/pdf.worker.min.mjs.
+
+Dipakai oleh viewer PDF di HP/tablet (app/static/index.html, fungsi pdfjs*). Di-load dinamis hanya saat
+sebuah PDF dibuka. Desktop memakai viewer bawaan browser (iframe) dan tidak memuat library ini.
+
+Cara upgrade:
+  1. cd ke folder sementara, jalankan: npm pack pdfjs-dist@<versi-baru>
+  2. Ekstrak legacy/build/pdf.min.mjs, legacy/build/pdf.worker.min.mjs, dan LICENSE dari tarball
+  3. Simpan di folder BARU app/static/vendor/pdfjs-<versi-baru>/ (nama ber-versi wajib: file di
+     /static/vendor/ di-cache 1 tahun dan immutable, jadi isi folder lama tidak boleh ditimpa)
+  4. Ubah konstanta PDFJS_BASE di app/static/index.html ke folder baru, uji semua PDF, hapus folder lama

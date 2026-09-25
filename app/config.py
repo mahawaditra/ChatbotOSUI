@@ -79,15 +79,27 @@ TOP_K: int = 5  # jumlah chunk maksimum yang akhirnya masuk ke prompt LLM
 # ini (skor antar chunk sangat rapat, ~0.75-0.81) baru stabil menemukan hasil #1 yang
 # benar mulai top_k>=20 — top_k=5/10 langsung ke Upstash bisa melewatkan chunk paling
 # relevan sama sekali. Vector store lokal (numpy, exact search) tidak punya masalah ini,
-# tapi nilai ini sengaja dipertahankan apa adanya untuk saat ini. Filter
-# SIMILARITY_THRESHOLD & pemangkasan ke TOP_K dilakukan setelah fetch ini, di retrieval.py.
+# tapi nilai ini sengaja dipertahankan apa adanya untuk saat ini. Gate SIMILARITY_THRESHOLD
+# (pada skor top-1) & pemangkasan ke TOP_K dilakukan setelah fetch ini, di retrieval.py.
 RETRIEVAL_FETCH_K: int = 25
 
-# Skor similarity minimum agar sebuah chunk dianggap relevan. Skor dihitung sebagai cosine
-# similarity yang dinormalisasi ke rentang [0,1] via (1 + cosine_similarity) / 2 (formula
-# yang sama seperti skor yang dulu dikembalikan Upstash untuk metric COSINE) — lihat
-# app/rag/vector_store.py::query(). Nilai ini dikalibrasi terhadap skor ternormalisasi itu.
-SIMILARITY_THRESHOLD: float = 0.5
+# Gate relevansi: skor TOP-1 minimum agar pertanyaan dianggap ada hubungannya dengan dokumen.
+# Di bawah ini, Gemini TIDAK dipanggil sama sekali dan jawabannya tanpa sumber. Skor = cosine
+# similarity yang dinormalisasi ke [0,1] via (1 + cosine_similarity) / 2 — lihat
+# app/rag/vector_store.py::query().
+#
+# Nilai 0.775 dipilih dari data (246 chunk, embedding tanpa taskType):
+#   - pertanyaan nyata dari log yang berhasil DIJAWAB: top-1 terendah 0.790 (di luar sapaan "halo")
+#   - pertanyaan jelas di luar topik: 0.737-0.794 (sebagian kecil yang berbau UI/Depok 0.80-0.84)
+# Kedua kelompok TUMPANG-TINDIH, jadi tidak ada threshold yang memisahkan bersih; angka ini sengaja
+# konservatif (hanya memotong ekor paling jauh, kira-kira seperempat input tak relevan) supaya
+# pertanyaan sungguhan tidak salah ditolak. Sisanya ditangani setelah Gemini menjawab: sumber
+# disembunyikan untuk jawaban penolakan (lihat app/rag/chain.py). Sudah dicoba dan TIDAK membantu:
+# taskType RETRIEVAL_QUERY/RETRIEVAL_DOCUMENT/QUESTION_ANSWERING, z-score, dan selisih terhadap rata-rata.
+# Gate TIDAK berlaku untuk pertanyaan berbahasa Inggris/non-Latin (chain._gate_applies): kemiripan
+# lintas-bahasa sistematis lebih rendah, pertanyaan Inggris sah terukur 0.768-0.834.
+# Setel ulang kalau dokumen berubah banyak (mis. pergantian SOP tahunan) atau ada pertanyaan valid ditolak.
+SIMILARITY_THRESHOLD: float = 0.775
 
 # --- LLM settings ---
 LLM_MODEL: str = "gemini-3.1-flash-lite"

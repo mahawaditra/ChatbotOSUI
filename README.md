@@ -21,6 +21,7 @@ This is also the author's first hands-on project exploring RAG. Some of the retr
 - [Organization accounts](#organization-accounts)
 - [Tech stack](#tech-stack)
 - [How it works](#how-it-works)
+- [Mobile support](#mobile-support)
 - [API endpoints](#api-endpoints)
 - [Deployment](#deployment)
 - [Known limitations](#known-limitations)
@@ -28,7 +29,8 @@ This is also the author's first hands-on project exploring RAG. Some of the retr
 ## Features
 
 - **Grounded Q&A, Indonesian by default**: answers come only from the actual AD/ART and SOP content; if it's not in the documents, the bot says so instead of guessing.
-- **Cited, clickable sources**: every answer lists the source file(s) and page(s) it was drawn from. Clicking a source opens the PDF in-app and jumps straight to that page.
+- **Cited, clickable sources**: every answer lists the source file(s) and page(s) it was actually drawn from (Gemini marks which retrieved passages it used; refusals and small talk show no sources). Clicking a source opens the PDF in-app and jumps straight to that page.
+- **Works on phones**: layout, touch targets, keyboard/safe-area handling, a Back button that closes the PDF viewer instead of leaving the app, a PDF viewer that works on iOS and Android, and "Add to Home Screen". See [Mobile support](#mobile-support).
 - **Context-aware follow-ups**: short follow-up questions ("terus kalau resign gimana?") are automatically rewritten into standalone queries using the conversation history, so retrieval quality doesn't degrade in multi-turn conversations.
 - **Admin-triggered reindexing**: whenever documents change, an admin can rebuild the entire searchable index.
 
@@ -216,7 +218,7 @@ Whoever currently holds these credentials is responsible for keeping the Drive d
 | Layer | Choice |
 |---|---|
 | Backend | [FastAPI](https://fastapi.tiangolo.com/) (Python 3.11+) |
-| Frontend | Single-page vanilla HTML/CSS/JS, served directly by FastAPI (no separate frontend framework or build step) |
+| Frontend | Single-page vanilla HTML/CSS/JS, served directly by FastAPI (no separate frontend framework or build step). [PDF.js](https://mozilla.github.io/pdf.js/) is vendored in `app/static/vendor/` and lazy-loaded only for the phone/tablet PDF viewer |
 | LLM (answers) | Google Gemini, via the `google-genai` SDK. Model set by `LLM_MODEL` in `app/config.py` |
 | Embeddings | Google Gemini embedding model, called via **raw REST** rather than the SDK (see comments in `app/rag/retrieval.py` / `app/rag/indexing.py`: the SDK's `v1beta` path didn't support the embedding model this project needs). Configured via `EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` in `app/config.py` |
 | Vector database | Local: a `numpy` array (`data/vector_store/vectors.npy`) + JSON metadata, committed straight to this git repo. No cloud vector DB account required; see [How it works](#how-it-works) |
@@ -242,20 +244,41 @@ Documents that follow a `"Pasal <N>"` article structure (currently the AD/ART) a
 
 ```mermaid
 flowchart TD
-    Q["User question"] --> H{"Prior conversation<br/>history?"}
+    Q["User question"] --> G{"Just a greeting /<br/>'thanks'?"}
+    G -->|Yes| GR["Fixed friendly reply<br/>(no embedding, no LLM)"]
+    G -->|No| H{"Prior conversation<br/>history?"}
     H -->|Yes| R["LLM rewrites it into a<br/>standalone query (1 extra Gemini call)"]
     H -->|No| S["Use the question as-is"]
     R --> V["Embed the query"]
     S --> V
     V --> M["Find the most similar candidate chunks<br/>in the local vector store (cosine similarity)"]
-    M --> T{"Any chunk scoring<br/>>= SIMILARITY_THRESHOLD?"}
-    T -->|No| X["Answer directly: 'information not found'<br/>(WITHOUT calling the LLM at all)"]
+    M --> T{"Top-1 score >= SIMILARITY_THRESHOLD?<br/>(Indonesian questions only)"}
+    T -->|No| X["Answer directly: 'not found'<br/>(WITHOUT calling the LLM at all)"]
     T -->|Yes| P["Build the prompt: document context<br/>+ ORIGINAL question (not the rewrite)<br/>+ conversation history"]
     P --> L["Call Gemini for the final answer"]
-    L --> AN["Answer + list of sources<br/>(file + page, deduplicated)"]
+    L --> AN["Answer + ONLY the sources Gemini says it used<br/>(none for refusals)"]
 ```
 
-If there's prior conversation history, the question is first rewritten by the LLM into a standalone query (so "terus kalau resign gimana?" keeps referring to whatever was being discussed); retrieval uses this rewritten query, but the final prompt uses the *original* question so citations/phrasing track what the user actually asked. Retrieval fetches a wider pool of candidates than what's actually needed (see `RETRIEVAL_FETCH_K` in [Known limitations](#known-limitations), a leftover from the old Upstash-based search), filters by a minimum similarity score, and trims to the top few. If nothing relevant survives that filter, the bot returns a refusal message without calling the LLM at all: saves cost/latency and avoids answering from irrelevant context.
+If the whole message is just a greeting or thanks ("halo", "terima kasih"), it gets a fixed reply with no embedding and no LLM call. A real question that merely *starts* with a greeting ("halo, apa denda telat kas?") is processed normally.
+
+If there's prior conversation history, the question is first rewritten by the LLM into a standalone query (so "terus kalau resign gimana?" keeps referring to whatever was being discussed); retrieval uses this rewritten query, but the final prompt uses the *original* question so citations/phrasing track what the user actually asked. Retrieval fetches a wider pool of candidates than what's actually needed (see `RETRIEVAL_FETCH_K` in [Known limitations](#known-limitations), a leftover from the old Upstash-based search), and the top few go into the prompt.
+
+**Relevance gate.** If even the best-matching chunk scores below `SIMILARITY_THRESHOLD` (0.775), the question is almost certainly unrelated to the documents, so the bot answers "not found" **without calling the LLM at all** (cheaper, faster, and avoids answering from irrelevant context). The gate is intentionally conservative and only skips questions that look Indonesian: similarity between an English question and the Indonesian documents is systematically lower, so legitimate English questions score 0.77-0.83 and would otherwise be wrongly rejected (Indonesian is the default, but answering members in other languages is a deliberate feature).
+
+**Which sources are shown.** The system prompt asks Gemini to end its answer with a marker like `[[SUMBER: 1, 3]]` (the numbers of the `[Sumber n]` context blocks it actually used, or `[[SUMBER: -]]` for none). The backend strips that marker from the text, and shows only those sources; refusals show none. If the marker is missing or unreadable, it falls back to showing all retrieved sources (the previous behavior), so a formatting slip never removes citations from a valid answer.
+
+## Mobile support
+
+The UI is built for phones first-class, not just "shrinks to fit":
+
+- **Layout & touch**: works from 320 px wide; all tap targets are ≥ 44 px; inputs are ≥ 16 px (prevents iOS auto-zoom); answers use the full screen width; tables in answers scroll sideways instead of breaking words; source chips are one-line with a page badge.
+- **Keyboard & notch**: `viewport-fit=cover` + `env(safe-area-inset-*)`; the app height follows the visible viewport, so the input box stays above the on-screen keyboard (including iOS Safari, via `visualViewport`). On phones Enter inserts a new line and the send button sends (desktop: Enter sends, Shift+Enter = new line); the keyboard is not reopened automatically after an answer, so it never covers the reply.
+- **Back button**: opening the document drawer or the PDF viewer adds a browser-history entry, so Android/iOS Back closes them instead of leaving the app (and wiping the conversation, which only lives in memory). Pull-to-refresh is disabled for the same reason.
+- **PDF viewer**: an `<iframe>` PDF only works in desktop browsers (Android Chrome doesn't render it; iOS Safari shows only page 1). Phones and tablets therefore use PDF.js, which renders the cited page to a canvas with previous/next and zoom controls. Desktop keeps the browser's built-in viewer (search, select, print). The library lives in `app/static/vendor/pdfjs-<version>/` and is downloaded only when a PDF is first opened; see `VERSION.txt` there for how to upgrade. Append `?viewer=pdfjs` to the URL to force the PDF.js viewer on desktop for testing.
+- **Performance on cheap phones**: `backdrop-filter` blur and the ambient glow are turned off ≤ 768 px, animations respect `prefers-reduced-motion`, and static assets are cached (`/static/vendor/` for a year, since folders are versioned).
+- **Add to Home Screen**: `manifest.webmanifest` + icons let members install the app icon (standalone, no browser bar). There is no service worker, so no offline mode.
+
+Testing without a phone: Chrome DevTools → device toolbar (Ctrl+Shift+M) and pick a phone. For real touch behaviour (keyboard, Back button, iOS Safari quirks), test on a physical device.
 
 ## API endpoints
 
@@ -301,12 +324,15 @@ The deployment target has changed a couple of times during development. **The cu
   ```
   Run it locally whenever `dokumen/` changes (it only needs `GEMINI_API_KEY`), then **commit `data/vector_store/` and redeploy**: the regenerated files ship as part of the deployment bundle. `/admin/reindex` still works for local dev via `uvicorn` (writing straight into your working tree), it's just not usable once deployed.
 - **Static & document serving needs no code changes.** Vercel's FastAPI integration auto-promotes `app.mount(..., StaticFiles(...))` directories (`/static`, `/dokumen`) to its CDN while *also* keeping them in the function bundle by default, which is exactly what's needed here, since `run_indexing()` reads `dokumen/*.pdf` from disk at runtime, not just serves it statically. (`dokumen/` is ~3.8MB total, nowhere near Vercel's 500MB bundle limit.) `data/vector_store/` is a plain committed directory read the same way at runtime by `app/rag/vector_store.py`, so it's expected to be included in the bundle the same way. Worth a one-time check against an actual Vercel deploy to confirm.
+- **Static files go through the function on Vercel.** Because the app has top-level middleware, Vercel keeps `/static` and `/dokumen` inside the function instead of promoting them to its CDN. Practical consequences: the response for any single file is capped at Vercel's ~4.5 MB function-response limit (the largest PDF today is 1.7 MB, so keep individual PDFs well under that), and caching relies on the `Cache-Control` headers set in `app/main.py` (`_cache_control_for`), not on the CDN. `/dokumen/*.pdf` is served with `X-Frame-Options: SAMEORIGIN` and no CSP (the global `DENY` would block the desktop PDF viewer's iframe).
 - **Environment variables** (`GEMINI_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `ADMIN_KEY`) need to be set in the Vercel project's dashboard (Settings → Environment Variables) or via `vercel env add`. This is account-side and can't be done from a config file in this repo. No vector-DB credentials are needed at all anymore.
 - A real bug this surfaced: `app/main.py` used to create `logs/` unconditionally at import time with no error handling. On Vercel's read-only-outside-`/tmp` filesystem that would have crashed the app at cold start, not just silently dropped logging; it's now wrapped in `try/except` so a failure there just disables file-based logging instead. Per-request JSON logs (`logs/*.json`) still won't persist on Vercel either way; regular `logging` calls (already used throughout) show up fine in Vercel's Function Logs regardless.
 
 ## Known limitations
 
 - **Indexing is always a full rebuild.** There's no per-document delete/update: every reindex re-processes and re-embeds all PDFs in `dokumen/` and overwrites the entire local vector store.
-- **`SIMILARITY_THRESHOLD`** (`app/config.py`) is a starting value, not a calibrated one. If valid answers start getting filtered out (threshold too high) or clearly off-topic questions still get answered (threshold too low), it needs adjusting against real query logs.
+- **The relevance gate can only catch part of the unrelated questions.** Similarity scores of on-topic and off-topic questions overlap (real answered questions: top-1 ≥ 0.79; unrelated questions: 0.74-0.79, and questions about the organization that simply aren't in the documents score as high as real ones, up to ~0.87), so no threshold separates them cleanly. `SIMILARITY_THRESHOLD = 0.775` was chosen to reject nothing that was really answered in the logs and only skips roughly a quarter of unrelated Indonesian questions; the rest still reach Gemini, which refuses, and the sources are then hidden. Things that were tried and **did not help**, so nobody needs to repeat them: embedding `taskType` (RETRIEVAL_QUERY/RETRIEVAL_DOCUMENT/QUESTION_ANSWERING), per-query z-score normalization, and score gap vs the mean. Re-check the value after a big document change (e.g. the yearly SOP swap): every chat logs `top_score` and `status` (`ok`/`gated`/`smalltalk`), which is the data to tune it with. A single-word question such as "kas" scores 0.76 and is rejected; the reply asks the user to write a fuller question.
+- **Do not add "refusal sentence must come first / add a translation" rules to `SYSTEM_PROMPT`.** That was tried and made Gemini refuse legitimate English questions (A/B test: "what is the penalty for late dues payment" was answered 3/3 without the rule, refused 3/3 with it). Refusals in other languages are recognised by the `[[SUMBER: -]]` marker instead.
+- **The phone PDF viewer has no text search/selection** (it draws pages onto a canvas). Every viewer has an "open original PDF" button as the fallback.
 - **`RETRIEVAL_FETCH_K` intentionally over-fetches** before trimming down to `TOP_K`. This is a leftover from when retrieval ran against Upstash Vector: Upstash's approximate nearest-neighbor search was found empirically to be unreliable at very small `top_k` values on this corpus (similarity scores across chunks cluster very tightly), occasionally missing the single most relevant chunk entirely when asked for only the top 5. The local vector store does an exact (brute-force) cosine similarity search, so it doesn't have this problem; `RETRIEVAL_FETCH_K` is kept as-is for now rather than bundling a behavior change into the storage migration, but could likely be reduced.
 - **Gemini free-tier rate limits apply.** Live chat answers retry once before returning a "please try again" message; indexing retries several times with exponential backoff, but sustained rate limiting will still surface as an error.

@@ -2,7 +2,17 @@
 <html lang="id" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- viewport-fit=cover: isi sampai ke tepi layar berponi (safe-area diurus lewat env(safe-area-inset-*)).
+       interactive-widget=resizes-content: keyboard HP ikut mengecilkan tinggi halaman (Chrome/Firefox
+       Android); iOS tidak mendukungnya, jadi ditangani lewat visualViewport di skrip bawah.
+       Sengaja TANPA maximum-scale/user-scalable=no, supaya pengguna tetap bisa zoom (aksesibilitas). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#090d16" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="OSUI Chatbot" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="description" content="Chatbot AD/ART & SOP OSUI Mahawaditra — Asisten cerdas seputar peraturan dan prosedur Orkes Simfoni Universitas Indonesia." />
   <title>Chatbot OSUI Mahawaditra</title>
 
@@ -16,12 +26,9 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
-  
-  <!-- Marked.js untuk Markdown rendering -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js" integrity="sha384-odPBjvtXVM/5hOYIr3A1dB+flh0c3wAT3bSesIOqEGmyUA4JoKf/YTWy0XKOYAY7" crossorigin="anonymous"></script>
-  <!-- DOMPurify untuk sanitasi HTML hasil render markdown sebelum dimasukkan ke DOM -->
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.15/dist/purify.min.js" integrity="sha384-uUMu9JDY09vBzRf9SPcK2VgUj+W/70J6Soc+Dded5P474ElQ63iv9j5N3DE7Kp3N" crossorigin="anonymous"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet" />
+  <!-- marked.js & DOMPurify sengaja dimuat di akhir <body> (sebelum skrip inline), bukan di sini:
+       di HP dengan jaringan lambat, script di <head> memblokir render pertama. -->
 
   <style>
     /* ==========================================================================
@@ -31,6 +38,7 @@
       /* Dark Theme (Default) - Luxury Symphony Dark */
       --bg-gradient: radial-gradient(circle at 50% 0%, #151d33 0%, #090d16 65%, #05070c 100%);
       --surface-bg: rgba(15, 23, 42, 0.75);
+      --surface-solid: #0f172a; /* pengganti --surface-bg yang buram di HP (tanpa backdrop-filter) */
       --surface-card: rgba(26, 38, 64, 0.6);
       --surface-card-hover: rgba(36, 52, 86, 0.85);
       --surface-input: rgba(11, 17, 31, 0.85);
@@ -61,12 +69,13 @@
       
       --backdrop-blur: blur(16px);
       --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-      --sidebar-width: 320px;
+      --sidebar-width: min(320px, 86vw);
     }
 
     [data-theme="light"] {
       --bg-gradient: radial-gradient(circle at 50% 0%, #f1f5f9 0%, #e2e8f0 70%, #cbd5e1 100%);
       --surface-bg: rgba(255, 255, 255, 0.85);
+      --surface-solid: #ffffff;
       --surface-card: rgba(255, 255, 255, 0.75);
       --surface-card-hover: rgba(241, 245, 249, 0.95);
       --surface-input: #ffffff;
@@ -126,7 +135,8 @@
        ========================================================================== */
     .app-wrapper {
       display: flex;
-      height: 100dvh;
+      /* --app-h diisi skrip dari visualViewport (iOS Safari tidak mengecilkan 100dvh saat keyboard muncul) */
+      height: var(--app-h, 100dvh);
       position: relative;
       z-index: 1;
     }
@@ -316,6 +326,9 @@
        ========================================================================== */
     .main-chat {
       flex: 1;
+      /* min-width: 0 wajib untuk item flex: tanpa ini lebar minimum konten terlebar (mis. tabel di jawaban)
+         merambat ke atas dan melebarkan SELURUH layout melebihi layar. */
+      min-width: 0;
       display: flex;
       flex-direction: column;
       height: 100%;
@@ -419,6 +432,8 @@
        ========================================================================== */
     .view-container {
       flex: 1;
+      min-width: 0;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -949,18 +964,257 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Responsive */
+    /* ==========================================================================
+       KOMPONEN TAMBAHAN (tautan, tabel, chip sumber, viewer PDF.js)
+       ========================================================================== */
+    button { font-family: inherit; }
+    button, .hero-card, .doc-item, .source-chip, .sources-header {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* Cegah pull-to-refresh / scroll-chaining yang me-reload halaman dan menghapus percakapan (yang hanya ada di memori) */
+    html, body { overscroll-behavior: none; }
+    .chat-stream { overscroll-behavior-y: contain; }
+
+    .bubble-content a {
+      color: var(--primary-accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    /* Tabel jawaban dibungkus .table-scroll oleh JS: layar sempit menggeser tabel, bukan memotong kata di tengah */
+    .table-scroll { overflow-x: auto; margin: 12px 0; -webkit-overflow-scrolling: touch; }
+    .table-scroll table { margin: 0; width: max-content; min-width: 100%; }
+    .bubble-content th, .bubble-content td {
+      min-width: 96px;
+      max-width: 280px;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+
+    /* Chip sumber: satu baris (nama dokumen dipotong ellipsis) + badge halaman, tinggi tap >= 40px */
+    .sources-body { flex-direction: column; align-items: stretch; }
+    .source-chip {
+      font: inherit;
+      font-size: 0.78rem;
+      text-align: left;
+      width: 100%;
+      min-height: 40px;
+      padding: 6px 10px;
+      gap: 8px;
+    }
+    .source-chip .chip-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .source-chip .chip-page {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(245, 184, 0, 0.16);
+      color: var(--primary-accent);
+    }
+    .sources-header { min-height: 40px; }
+
+    /* Viewer PDF.js (HP/tablet). Desktop memakai <iframe> bawaan browser. */
+    .pdf-viewer-title { flex: 1; min-width: 0; }
+    .pdfjs-only { display: none; }
+    .pdf-viewer-container.mode-pdfjs .pdfjs-only { display: flex; }
+    .pdf-viewer-container.mode-pdfjs .pdf-iframe { display: none; }
+    .pdfjs-stage {
+      display: none;
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      flex-direction: column;
+      background: #1e293b;
+    }
+    .pdf-viewer-container.mode-pdfjs .pdfjs-stage { display: flex; }
+    .pdfjs-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; padding: 10px; }
+    .pdfjs-page { width: max-content; margin: 0 auto; }
+    .pdfjs-page canvas { display: block; background: #fff; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
+    .pdfjs-status {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      padding: 24px;
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 0.9rem;
+      pointer-events: none;
+    }
+    .pdfjs-status.show { display: flex; }
+    .pdfjs-status a { pointer-events: auto; color: var(--primary-accent); }
+    .pdfjs-nav {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 8px 12px;
+      background: var(--surface-bg);
+      border-top: 1px solid var(--border-color);
+    }
+    .pdf-viewer-container.mode-pdfjs .pdfjs-nav { display: flex; }
+    .pdfjs-page-info { min-width: 110px; text-align: center; font-size: 0.85rem; font-weight: 600; }
+    .btn-pdf-action:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Layar sentuh: :hover menempel setelah di-tap dan membuat tombol/kartu terlihat "nyangkut".
+       Kembalikan ke tampilan dasar di perangkat tanpa hover. */
+    @media (hover: none) {
+      .btn-close-sidebar:hover { background: none; color: var(--text-sub); }
+      .btn-nav-chat:hover:not(.active) { background: var(--surface-card); border-color: var(--border-color); color: var(--text-main); }
+      .doc-item:hover:not(.active) { background: var(--surface-card); border-color: var(--border-color); color: var(--text-main); transform: none; }
+      .btn-header-icon:hover { background: var(--surface-card); border-color: var(--border-color); }
+      .hero-card:hover { background: var(--surface-card); border-color: var(--border-color); transform: none; box-shadow: none; }
+      .sources-header:hover { background: none; color: var(--text-sub); }
+      .source-chip:hover { background: var(--accent-indigo-bg); color: var(--text-main); border-color: rgba(99, 102, 241, 0.3); }
+      .btn-action-sm:hover { background: none; color: var(--text-muted); }
+      .btn-pdf-action:hover { background: var(--surface-card); border-color: var(--border-color); color: var(--text-main); }
+      #sendBtn:hover:not(:disabled) { transform: none; }
+      .btn-clear-input:hover { color: var(--text-muted); }
+    }
+    @media (hover: hover) {
+      .source-chip:hover .chip-page { background: rgba(0, 0, 0, 0.16); color: #000; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    /* ==========================================================================
+       MOBILE (<= 768px)
+       ========================================================================== */
     @media (max-width: 768px) {
+      /* Performa: backdrop-filter dan glow ber-blur berat di GPU HP murah, apalagi di setiap bubble yang ikut ter-scroll */
+      html, body { background-attachment: scroll; }
+      .ambient-glow { display: none; }
+      .chat-header, .pdf-viewer-bar, .hero-card, .input-dock, .toast, .sidebar, .sidebar-backdrop,
+      .message-row.bot .bubble {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+      }
+
+      /* Drawer dokumen */
       .sidebar {
         position: fixed;
         left: 0;
         top: 0;
         bottom: 0;
+        background: var(--surface-solid); /* tanpa blur, latar harus buram agar teks di belakangnya tidak tembus */
         box-shadow: var(--shadow-sm);
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
       }
       .sidebar.closed { transform: translateX(-100%); margin-left: 0; }
+      .sidebar-header { padding: 12px 12px 12px 16px; }
+      .btn-close-sidebar { width: 44px; height: 44px; }
+      .doc-item { min-height: 48px; }
+      .sidebar-search input { font-size: 16px; min-height: 44px; } /* >=16px: iOS tidak auto-zoom saat fokus */
+      .btn-nav-chat { min-height: 44px; }
+      .btn-action-sm { min-height: 40px; padding: 6px 10px; }
+
+      /* Header: ringkas, tombol 44px, hormati poni/status bar */
+      .chat-header {
+        height: calc(56px + env(safe-area-inset-top));
+        padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+      }
+      .header-left { flex: 1; min-width: 0; gap: 8px; }
+      .header-brand { min-width: 0; gap: 8px; }
+      .header-logo-container { width: 36px; height: 36px; flex-shrink: 0; }
+      .header-info { min-width: 0; }
+      .header-info .brand-title {
+        display: block;
+        font-size: 0.95rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .header-info .brand-subtitle { display: none; }
+      .header-actions { gap: 6px; flex-shrink: 0; }
+      .btn-header-icon { width: 44px; height: 44px; }
+
+      /* Percakapan: bubble memakai lebar penuh */
+      .chat-stream { padding: 14px 12px; gap: 14px; }
+      .message-row { max-width: 100%; gap: 8px; }
+      .message-row.bot { width: 100%; }
+      .message-row.user { max-width: 92%; }
+      .message-row.user .avatar { display: none; }
+      .avatar { width: 28px; height: 28px; border-radius: 8px; }
+      .bubble-wrapper { min-width: 0; flex: 1; }
+      .message-row.user .bubble-wrapper { flex: 0 1 auto; }
+      .bubble { padding: 12px 14px; font-size: 0.95rem; overflow-wrap: anywhere; }
       .hero-cards-grid { grid-template-columns: 1fr; }
-      .message-row { max-width: 94%; }
+      .hero-card { min-height: 64px; }
+      .welcome-hero { padding: 12px 4px; }
+      .welcome-hero h2 { font-size: 1.25rem; }
+
+      /* Input */
+      .input-dock-container {
+        padding: 8px max(12px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      }
+      #questionInput { font-size: 16px; }
+      #sendBtn { width: 44px; height: 44px; }
+      .btn-clear-input { width: 36px; height: 36px; }
+
+      /* Viewer PDF: satu bar saja (header utama disembunyikan), semua tombol >= 44px */
+      body.pdf-open .chat-header { display: none; }
+      .pdf-viewer-bar { padding: calc(6px + env(safe-area-inset-top)) 8px 6px; gap: 6px; }
+      .pdf-viewer-title { font-size: 0.85rem; }
+      .pdf-viewer-title svg { flex-shrink: 0; }
+      .pdf-viewer-actions { gap: 6px; }
+      .btn-pdf-action { min-width: 44px; min-height: 44px; padding: 0 10px; justify-content: center; }
+      .btn-pdf-action .btn-label { display: none; }
+      .pdfjs-nav { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+      .pdfjs-nav .btn-pdf-action { min-width: 56px; }
+
+      /* Toast di atas-tengah: di bawah/kanan akan menabrak input dan keyboard */
+      .toast-container {
+        top: calc(12px + env(safe-area-inset-top));
+        bottom: auto;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        align-items: center;
+        width: max-content;
+        max-width: 92vw;
+      }
+    }
+
+    /* Toast hanya informasi: jangan pernah menghalangi tap pada tombol di bawahnya (bar viewer, header) */
+    .toast-container, .toast { pointer-events: none; }
+
+    /* HP: avatar bot disembunyikan agar bubble memakai lebar baca maksimal (identitas bot sudah jelas dari header) */
+    @media (max-width: 480px) {
+      .message-row.bot .avatar { display: none; }
+    }
+    /* Layar sangat sempit: logo di header disembunyikan (sudah ada di banner sapaan) agar judul tidak terpotong */
+    @media (max-width: 380px) {
+      .header-logo-container { display: none; }
+    }
+    /* Layar lebar + sentuh (tablet): bubble tidak perlu memakai lebar penuh */
+    @media (min-width: 481px) and (max-width: 768px) {
+      .message-row.bot { max-width: 92%; width: auto; }
+    }
+    /* HP landscape: tinggi sangat terbatas */
+    @media (max-height: 500px) and (orientation: landscape) {
+      .chat-header { height: calc(48px + env(safe-area-inset-top)); }
+      .input-meta { display: none; }
+      .welcome-hero { padding: 4px; }
+      .hero-icon-wrapper { display: none; }
     }
   </style>
 </head>
@@ -1183,22 +1437,43 @@
         <!-- 2. PDF VIEWER MODE -->
         <div class="pdf-viewer-container" id="pdfViewerMode">
           <div class="pdf-viewer-bar">
+            <button class="btn-pdf-action" onclick="switchToChatView()" aria-label="Kembali ke chat" title="Kembali ke chat">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+              <span class="btn-label">Kembali ke Chat</span>
+            </button>
             <div class="pdf-viewer-title" id="pdfViewerTitle">
               <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
               <span id="pdfFileNameText">Nama Dokumen.pdf</span>
             </div>
             <div class="pdf-viewer-actions">
-              <button class="btn-pdf-action" onclick="switchToChatView()">
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-                Kembali ke Chat
+              <button class="btn-pdf-action pdfjs-only" id="btnPdfZoomOut" aria-label="Perkecil" title="Perkecil">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
               </button>
-              <a href="#" target="_blank" class="btn-pdf-action" id="btnPdfOpenNewTab">
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                Tab Baru
+              <button class="btn-pdf-action pdfjs-only" id="btnPdfZoomIn" aria-label="Perbesar" title="Perbesar">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <a href="#" target="_blank" rel="noopener" class="btn-pdf-action" id="btnPdfOpenNewTab" aria-label="Buka PDF asli di tab baru" title="Buka PDF asli di tab baru">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                <span class="btn-label">Tab Baru</span>
               </a>
             </div>
           </div>
-          <iframe id="pdfIframe" class="pdf-iframe" src="about:blank"></iframe>
+          <!-- Desktop: viewer PDF bawaan browser -->
+          <iframe id="pdfIframe" class="pdf-iframe" title="Dokumen PDF" src="about:blank"></iframe>
+          <!-- HP/tablet: iframe PDF tidak bisa diandalkan (Android tidak merender, iOS hanya halaman 1), jadi dirender PDF.js ke canvas -->
+          <div class="pdfjs-stage" id="pdfjsStage">
+            <div class="pdfjs-scroll" id="pdfjsScroll"><div class="pdfjs-page"><canvas id="pdfjsCanvas"></canvas></div></div>
+            <div class="pdfjs-status" id="pdfjsStatus" role="status"></div>
+          </div>
+          <div class="pdfjs-nav" id="pdfjsNav">
+            <button class="btn-pdf-action" id="btnPdfPrev" aria-label="Halaman sebelumnya" title="Halaman sebelumnya">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span class="pdfjs-page-info" id="pdfPageInfo">Hal. 1 / 1</span>
+            <button class="btn-pdf-action" id="btnPdfNext" aria-label="Halaman berikutnya" title="Halaman berikutnya">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          </div>
         </div>
 
       </div>
@@ -1209,9 +1484,11 @@
           <div class="input-row">
             <textarea
               id="questionInput"
-              placeholder="Ketik pertanyaan tentang AD/ART atau SOP..."
+              placeholder="Tanya seputar AD/ART atau SOP..."
               rows="1"
               aria-label="Ketik Pertanyaan"
+              autocomplete="off"
+              autocapitalize="sentences"
             ></textarea>
 
             <div class="input-controls">
@@ -1238,10 +1515,17 @@
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
+  <!-- Library pihak ketiga (dengan SRI), di akhir body agar tidak memblokir render pertama. -->
+  <!-- Marked.js untuk Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js" integrity="sha384-odPBjvtXVM/5hOYIr3A1dB+flh0c3wAT3bSesIOqEGmyUA4JoKf/YTWy0XKOYAY7" crossorigin="anonymous"></script>
+  <!-- DOMPurify untuk sanitasi HTML hasil render markdown sebelum dimasukkan ke DOM -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.15/dist/purify.min.js" integrity="sha384-uUMu9JDY09vBzRf9SPcK2VgUj+W/70J6Soc+Dded5P474ElQ63iv9j5N3DE7Kp3N" crossorigin="anonymous"></script>
+
   <!-- JavaScript -->
   <script>
-    // Marked configuration
-    marked.setOptions({ breaks: true, gfm: true });
+    // Marked configuration. Library dimuat dari CDN; di jaringan HP yang buruk bisa gagal — kalau begitu
+    // aplikasi tetap jalan dan jawaban tampil sebagai teks biasa (lihat renderMarkdown).
+    if (typeof marked !== 'undefined') marked.setOptions({ breaks: true, gfm: true });
 
     // DOM Elements
     const chatStream         = document.getElementById('chatStream');
@@ -1254,7 +1538,7 @@
     const sidebarBackdrop    = document.getElementById('sidebarBackdrop');
 
     const pdfViewerMode      = document.getElementById('pdfViewerMode');
-    const pdfIframe          = document.getElementById('pdfIframe');
+    let   pdfIframe          = document.getElementById('pdfIframe');   // diganti elemen baru tiap kali, lihat setPdfIframe()
     const pdfFileNameText    = document.getElementById('pdfFileNameText');
     const btnPdfOpenNewTab   = document.getElementById('btnPdfOpenNewTab');
     const inputDockContainer = document.getElementById('inputDockContainer');
@@ -1264,6 +1548,53 @@
     const MAX_CHARS   = 500;
     const MAX_HISTORY = 3;
     let conversationHistory = [];
+
+    // ---- Deteksi perangkat & layout ----
+    const mqMobile = window.matchMedia('(max-width: 768px)');
+    const mqCoarse = window.matchMedia('(pointer: coarse)');
+    const isMobileLayout = () => mqMobile.matches;
+    // Pointer UTAMA berupa jari (HP/tablet): Enter = baris baru dan keyboard tidak dibuka otomatis setelah jawaban.
+    // Laptop layar sentuh (pointer utama = mouse) tetap dianggap desktop.
+    const isTouchDevice = () => mqCoarse.matches;
+
+    // Iframe PDF hanya andal di browser desktop: Android tidak merender PDF di iframe, iOS/iPadOS hanya
+    // menampilkan halaman 1. Di luar itu dipakai PDF.js. `?viewer=pdfjs` memaksa PDF.js (untuk QA di desktop).
+    function shouldUseNativePdf() {
+      if (new URLSearchParams(location.search).get('viewer') === 'pdfjs') return false;
+      const mobileUA = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const iPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+      return window.matchMedia('(hover: hover) and (pointer: fine)').matches && !mobileUA && !iPadOS;
+    }
+
+    // Label ramah untuk nama file PDF, dibaca dari daftar dokumen di sidebar (satu sumber kebenaran,
+    // tidak perlu memelihara daftar kedua saat SOP berganti tahunan).
+    const DOC_LABELS = {};
+    document.querySelectorAll('#docList .doc-item').forEach(el => {
+      const m = /openPdfDocument\('([^']+)',\s*'([^']+)'/.exec(el.getAttribute('onclick') || '');
+      if (m) DOC_LABELS[m[1]] = m[2];
+    });
+    const docLabel = (file) => DOC_LABELS[file] || String(file).replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ');
+
+    // Markdown -> HTML aman. null kalau library gagal dimuat (pemanggil menampilkan teks biasa).
+    function renderMarkdown(text) {
+      if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return null;
+      return DOMPurify.sanitize(marked.parse(text));
+    }
+
+    // Rapikan HTML hasil render: tabel dibungkus agar bisa digeser horizontal di layar sempit, dan tautan
+    // dari isi jawaban dibuka di tab baru (klik biasa akan meninggalkan halaman dan menghapus percakapan).
+    function enhanceRenderedMarkdown(root) {
+      root.querySelectorAll('table').forEach(table => {
+        const wrap = document.createElement('div');
+        wrap.className = 'table-scroll';
+        table.replaceWith(wrap);
+        wrap.appendChild(table);
+      });
+      root.querySelectorAll('a[href]').forEach(a => {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer nofollow';
+      });
+    }
 
     // Auto-resize Textarea & Char Counter
     inputEl.addEventListener('input', () => {
@@ -1288,10 +1619,17 @@
     });
 
     inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      // Di HP Enter = baris baru (kirim lewat tombol), seperti aplikasi chat pada umumnya.
+      // isComposing: jangan mengirim saat IME/keyboard prediktif masih menyusun kata.
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isTouchDevice()) {
         e.preventDefault();
         sendMessage();
       }
+    });
+
+    // Setelah keyboard HP muncul, pastikan pesan terakhir tetap terlihat
+    inputEl.addEventListener('focus', () => {
+      if (isTouchDevice()) setTimeout(() => chatStream.scrollTo({ top: chatStream.scrollHeight }), 350);
     });
 
     function clearInput() {
@@ -1307,9 +1645,7 @@
     function sendCustomPrompt(text) {
       inputEl.value = text;
       inputEl.dispatchEvent(new Event('input'));
-      if (window.innerWidth <= 768 && !sidebar.classList.contains('closed')) {
-        toggleSidebar();
-      }
+      closeSidebar();
       sendMessage();
     }
 
@@ -1318,17 +1654,69 @@
       const currentTheme = document.documentElement.getAttribute('data-theme');
       const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', nextTheme);
+      const metaTheme = document.querySelector('meta[name="theme-color"]');
+      if (metaTheme) metaTheme.setAttribute('content', nextTheme === 'dark' ? '#090d16' : '#f1f5f9');
       showToast(`Tema diganti ke ${nextTheme === 'dark' ? 'Gelap 🌙' : 'Terang ☀️'}`);
     }
 
-    // Toggle Sidebar
+    // ---- Lapisan UI di riwayat browser ----
+    // Di HP, tombol Back harus menutup drawer / viewer PDF, bukan keluar dari aplikasi (dan menghapus
+    // percakapan). Setiap lapisan yang terbuka mendorong satu entri history; layerStack mencatat urutannya.
+    const layerStack = [];    // 'drawer' | 'pdf'
+    let ignorePops = 0;       // popstate yang berasal dari history.go() buatan kode sendiri (bukan tombol Back)
+    let ignorePopsTimer = null;
+
+    function layerPush(name) {
+      history.pushState({ layer: name }, '');
+      layerStack.push(name);
+    }
+    // Ganti lapisan teratas tanpa menambah entri history (mis. membuka PDF dari dalam drawer)
+    function layerSwapTop(name) {
+      history.replaceState({ layer: name }, '');
+      layerStack[layerStack.length - 1] = name;
+    }
+    // Tutup `count` lapisan teratas dari kode (tombol UI), dalam SATU langkah history
+    function layerPopViaCode(count) {
+      count = Math.min(count, layerStack.length);
+      if (count <= 0) return;
+      layerStack.splice(layerStack.length - count, count);
+      ignorePops++;
+      clearTimeout(ignorePopsTimer);
+      // Pengaman: kalau history.go() ternyata tidak memicu popstate, jangan sampai Back berikutnya ikut diabaikan
+      ignorePopsTimer = setTimeout(() => { ignorePops = 0; }, 800);
+      history.go(-count);
+    }
+    window.addEventListener('popstate', () => {
+      if (ignorePops > 0) { ignorePops--; return; }
+      const top = layerStack.pop();   // tombol Back ditekan pengguna
+      if (top === 'drawer') setSidebar(false);
+      else if (top === 'pdf') hidePdfViewer();
+    });
+
+    // ---- Sidebar / drawer dokumen ----
+    function setSidebar(open) {
+      sidebar.classList.toggle('closed', !open);
+      sidebarBackdrop.classList.toggle('active', open && isMobileLayout());
+    }
+    // Tombol menu, tombol X, dan backdrop
     function toggleSidebar() {
-      sidebar.classList.toggle('closed');
-      const isOpen = !sidebar.classList.contains('closed');
-      if (window.innerWidth <= 768) {
-        sidebarBackdrop.classList.toggle('active', isOpen);
+      if (sidebar.classList.contains('closed')) {
+        setSidebar(true);
+        if (isMobileLayout()) layerPush('drawer');
+      } else {
+        closeSidebar(true);
       }
     }
+    // Menutup drawer dari kode. Di desktop sidebar adalah panel tetap, jadi hanya ditutup bila `force`.
+    function closeSidebar(force = false) {
+      if (sidebar.classList.contains('closed')) return;
+      if (!isMobileLayout() && !force) return;
+      const drawerOnTop = layerStack[layerStack.length - 1] === 'drawer';
+      setSidebar(false);
+      if (drawerOnTop) layerPopViaCode(1);
+    }
+    // Rotasi / resize melewati breakpoint: sinkronkan backdrop
+    mqMobile.addEventListener('change', () => setSidebar(!sidebar.classList.contains('closed')));
 
     // Sidebar PDF Document Search Filter
     function filterSidebarDocs() {
@@ -1340,45 +1728,250 @@
       });
     }
 
-    // Switch View to PDF Document Viewer
+    // ---- Viewer PDF ----
+    // Library PDF.js di-vendor di app/static/vendor/ (lihat VERSION.txt di sana untuk cara upgrade) dan
+    // baru diunduh saat PDF pertama dibuka di HP/tablet. Desktop memakai <iframe> bawaan browser.
+    const PDFJS_BASE = '/static/vendor/pdfjs-6.3.289/';
+    const PDF_ZOOM_STEPS = [1, 1.5, 2, 3];
+    const PDF_MAX_PIXELS = 8_000_000;          // batas piksel canvas: jaga memori HP
+    const pdfjsScroll   = document.getElementById('pdfjsScroll');
+    const pdfjsCanvas   = document.getElementById('pdfjsCanvas');
+    const pdfjsStatus   = document.getElementById('pdfjsStatus');
+    const pdfPageInfo   = document.getElementById('pdfPageInfo');
+    const btnPdfPrev    = document.getElementById('btnPdfPrev');
+    const btnPdfNext    = document.getElementById('btnPdfNext');
+    const btnPdfZoomIn  = document.getElementById('btnPdfZoomIn');
+    const btnPdfZoomOut = document.getElementById('btnPdfZoomOut');
+
+    let pdfjsLibPromise = null;
+    let pdfDoc = null, pdfDocFile = null;
+    let pdfPageNum = 1, pdfZoomIdx = 0;
+    let pdfRenderTask = null, pdfRenderToken = 0, pdfOpenToken = 0, pdfRenderedWidth = 0;
+
+    const pdfUrl = (filename, page) => `/dokumen/${encodeURIComponent(filename)}` + (page ? `#page=${page}` : '');
+
+    // Mengganti `src` iframe yang SUDAH pernah memuat halaman menambah entri riwayat browser, sehingga tombol
+    // Back menavigasi iframe (tidak terlihat) alih-alih menutup viewer. Iframe yang baru dibuat tidak
+    // menambah entri, jadi setiap membuka/menutup dokumen, iframe diganti elemen baru (url null = kosong).
+    function setPdfIframe(url) {
+      const fresh = document.createElement('iframe');
+      fresh.id = 'pdfIframe';
+      fresh.className = 'pdf-iframe';
+      fresh.title = 'Dokumen PDF';
+      if (url) fresh.src = url;
+      pdfIframe.replaceWith(fresh);
+      pdfIframe = fresh;
+    }
+
+    function loadPdfjs() {
+      if (!pdfjsLibPromise) {
+        pdfjsLibPromise = import(PDFJS_BASE + 'pdf.min.mjs')
+          .then((lib) => {
+            lib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.mjs';
+            return lib;
+          })
+          .catch((err) => { pdfjsLibPromise = null; throw err; });   // boleh dicoba lagi (mis. jaringan pulih)
+      }
+      return pdfjsLibPromise;
+    }
+
+    function showPdfStatus(message, fallbackHref) {
+      pdfjsStatus.replaceChildren();
+      const text = document.createElement('span');
+      text.textContent = message;
+      pdfjsStatus.appendChild(text);
+      if (fallbackHref) {
+        const a = document.createElement('a');
+        a.href = fallbackHref;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = 'Buka PDF asli';
+        pdfjsStatus.appendChild(a);
+      }
+      pdfjsStatus.classList.add('show');
+    }
+    const hidePdfStatus = () => pdfjsStatus.classList.remove('show');
+
+    function updatePdfNav() {
+      const total = pdfDoc ? pdfDoc.numPages : 1;
+      pdfPageInfo.textContent = `Hal. ${pdfPageNum} / ${total}`;
+      btnPdfPrev.disabled = pdfPageNum <= 1;
+      btnPdfNext.disabled = pdfPageNum >= total;
+      btnPdfZoomOut.disabled = pdfZoomIdx <= 0;
+      btnPdfZoomIn.disabled = pdfZoomIdx >= PDF_ZOOM_STEPS.length - 1;
+    }
+
+    // Render satu halaman ke canvas, fit-to-width x zoom, tajam di layar retina tapi dibatasi DPR 2 dan total piksel
+    async function renderPdfPage(resetScroll = true) {
+      if (!pdfDoc) return;
+      const token = ++pdfRenderToken;
+      if (pdfRenderTask) { try { pdfRenderTask.cancel(); } catch (_) {} pdfRenderTask = null; }
+      updatePdfNav();
+
+      const page = await pdfDoc.getPage(pdfPageNum);
+      if (token !== pdfRenderToken) return;
+
+      const base = page.getViewport({ scale: 1 });
+      const availWidth = Math.max(pdfjsScroll.clientWidth - 20, 200);
+      const cssScale = (availWidth / base.width) * PDF_ZOOM_STEPS[pdfZoomIdx];
+      let outScale = cssScale * Math.min(window.devicePixelRatio || 1, 2);
+      const pixels = base.width * base.height * outScale * outScale;
+      if (pixels > PDF_MAX_PIXELS) outScale *= Math.sqrt(PDF_MAX_PIXELS / pixels);
+
+      const viewport = page.getViewport({ scale: outScale });
+      pdfjsCanvas.width = Math.floor(viewport.width);
+      pdfjsCanvas.height = Math.floor(viewport.height);
+      pdfjsCanvas.style.width = Math.floor(base.width * cssScale) + 'px';
+      pdfjsCanvas.style.height = Math.floor(base.height * cssScale) + 'px';
+      pdfRenderedWidth = pdfjsScroll.clientWidth;
+
+      // Mengubah ukuran canvas mengosongkannya; di HP lambat halaman baru butuh beberapa ratus ms untuk terlukis,
+      // jadi tampilkan status kalau render belum selesai dalam 200 ms (bukan kanvas kosong yang membingungkan).
+      const slowTimer = setTimeout(() => { if (token === pdfRenderToken) showPdfStatus('Memuat halaman…'); }, 200);
+      const task = page.render({ canvasContext: pdfjsCanvas.getContext('2d'), viewport });
+      pdfRenderTask = task;
+      try {
+        await task.promise;
+      } catch (err) {
+        if (err && err.name === 'RenderingCancelledException') return;   // diganti render yang lebih baru
+        throw err;
+      } finally {
+        clearTimeout(slowTimer);
+        if (token === pdfRenderToken) hidePdfStatus();   // baru disembunyikan SETELAH halaman benar-benar terlukis
+      }
+      if (token === pdfRenderToken && resetScroll) pdfjsScroll.scrollTo(0, 0);
+    }
+
+    function pdfRenderFailed(err) {
+      console.error('PDF.js gagal merender:', err);
+      showPdfStatus('Halaman ini tidak bisa ditampilkan di sini.', btnPdfOpenNewTab.href);
+    }
+
+    async function openPdfWithPdfjs(filename, page) {
+      if (pdfDocFile !== filename) releasePdfjs();   // dokumen lain: buang yang lama (sekaligus membatalkan pembukaan sebelumnya)
+      const myOpen = ++pdfOpenToken;
+      showPdfStatus('Memuat dokumen…');
+      try {
+        const lib = await loadPdfjs();
+        if (myOpen !== pdfOpenToken) return;
+        if (pdfDocFile !== filename) {
+          const doc = await lib.getDocument({ url: `/dokumen/${encodeURIComponent(filename)}` }).promise;
+          if (myOpen !== pdfOpenToken) { doc.destroy(); return; }
+          pdfDoc = doc;
+          pdfDocFile = filename;
+        }
+        pdfPageNum = Math.min(Math.max(parseInt(page, 10) || 1, 1), pdfDoc.numPages);
+        pdfZoomIdx = 0;
+        await renderPdfPage();   // status "Memuat dokumen…" tetap tampil sampai halaman selesai terlukis
+      } catch (err) {
+        if (myOpen !== pdfOpenToken) return;
+        console.error('PDF.js gagal memuat:', err);
+        showPdfStatus('Dokumen tidak bisa ditampilkan di sini.', pdfUrl(filename, page));
+      }
+    }
+
+    function releasePdfjs() {
+      pdfOpenToken++;
+      pdfRenderToken++;
+      if (pdfRenderTask) { try { pdfRenderTask.cancel(); } catch (_) {} pdfRenderTask = null; }
+      if (pdfDoc) { try { pdfDoc.destroy(); } catch (_) {} }
+      pdfDoc = null;
+      pdfDocFile = null;
+      pdfjsCanvas.width = pdfjsCanvas.height = 0;
+      hidePdfStatus();
+    }
+
+    function goPdfPage(n) {
+      if (!pdfDoc) return;
+      const next = Math.min(Math.max(n, 1), pdfDoc.numPages);
+      if (next === pdfPageNum) return;
+      pdfPageNum = next;
+      renderPdfPage().catch(pdfRenderFailed);
+    }
+    function zoomPdf(delta) {
+      const next = Math.min(Math.max(pdfZoomIdx + delta, 0), PDF_ZOOM_STEPS.length - 1);
+      if (next === pdfZoomIdx) return;
+      pdfZoomIdx = next;
+      renderPdfPage(false).catch(pdfRenderFailed);
+    }
+    btnPdfPrev.addEventListener('click', () => goPdfPage(pdfPageNum - 1));
+    btnPdfNext.addEventListener('click', () => goPdfPage(pdfPageNum + 1));
+    btnPdfZoomIn.addEventListener('click', () => zoomPdf(+1));
+    btnPdfZoomOut.addEventListener('click', () => zoomPdf(-1));
+
+    // Rotasi layar: render ulang supaya halaman kembali fit-to-width. Perubahan tinggi saja (address bar HP
+    // yang muncul/hilang) tidak memicu render ulang.
+    let pdfResizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(pdfResizeTimer);
+      pdfResizeTimer = setTimeout(() => {
+        if (pdfDoc && pdfViewerMode.classList.contains('mode-pdfjs') && pdfjsScroll.clientWidth !== pdfRenderedWidth) {
+          renderPdfPage(false).catch(pdfRenderFailed);
+        }
+      }, 250);
+    });
+
+    // Buka viewer PDF (dari daftar dokumen di sidebar atau dari chip sumber di jawaban)
     function openPdfDocument(filename, label, element, page) {
       document.querySelectorAll('#docList .doc-item').forEach(el => el.classList.remove('active'));
       if (element) element.classList.add('active');
       btnNavChat.classList.remove('active');
 
-      const pdfUrl = `/dokumen/${filename}` + (page ? `#page=${page}` : '');
-      // Paksa reload meski hanya fragment #page yang berubah (mis. buka halaman lain dari file yang sama)
-      pdfIframe.src = 'about:blank';
-      pdfIframe.src = pdfUrl;
-      pdfFileNameText.textContent = label || filename;
-      btnPdfOpenNewTab.href = pdfUrl;
+      const title = label || docLabel(filename);
+      pdfFileNameText.textContent = title;
+      btnPdfOpenNewTab.href = pdfUrl(filename, page);
+
+      // Viewer menumpuk satu entri history supaya tombol Back menutupnya. Kalau dibuka dari dalam drawer
+      // (HP), entri drawer digantikan; kalau viewer sudah terbuka (ganti dokumen), tidak menambah entri.
+      const drawerOnTop = layerStack[layerStack.length - 1] === 'drawer';
+      if (layerStack.includes('pdf')) {
+        if (drawerOnTop) closeSidebar();
+      } else if (drawerOnTop) {
+        setSidebar(false);
+        layerSwapTop('pdf');
+      } else {
+        layerPush('pdf');
+      }
 
       chatStream.style.display = 'none';
       inputDockContainer.style.display = 'none';
       btnHeaderClear.style.display = 'none';
       pdfViewerMode.classList.add('active');
+      document.body.classList.add('pdf-open');
 
-      if (window.innerWidth <= 768 && !sidebar.classList.contains('closed')) {
-        toggleSidebar();
+      if (shouldUseNativePdf()) {
+        pdfViewerMode.classList.remove('mode-pdfjs');
+        setPdfIframe(pdfUrl(filename, page));   // iframe baru: sekaligus memaksa muat ulang walau hanya #page yang berubah
+      } else {
+        pdfViewerMode.classList.add('mode-pdfjs');
+        setPdfIframe(null);
+        openPdfWithPdfjs(filename, page);
       }
-      showToast(`Membuka ${label || filename}`);
+      // Di HP viewer yang terbuka sudah jadi umpan baliknya; toast malah menutupi bar viewer
+      if (!isMobileLayout()) showToast(`Membuka ${title}`);
     }
 
-    // Switch View back to Chatbot Asisten
-    function switchToChatView() {
-      document.querySelectorAll('#docList .doc-item').forEach(el => el.classList.remove('active'));
-      btnNavChat.classList.add('active');
-
-      pdfViewerMode.classList.remove('active');
-      pdfIframe.src = 'about:blank';
+    // Tutup viewer: hanya UI dan pembersihan, TIDAK menyentuh history (dipakai juga oleh popstate)
+    function hidePdfViewer() {
+      pdfViewerMode.classList.remove('active', 'mode-pdfjs');
+      document.body.classList.remove('pdf-open');
+      setPdfIframe(null);
+      releasePdfjs();
 
       chatStream.style.display = 'flex';
       inputDockContainer.style.display = 'block';
       btnHeaderClear.style.display = 'flex';
+      document.querySelectorAll('#docList .doc-item').forEach(el => el.classList.remove('active'));
+      btnNavChat.classList.add('active');
+    }
 
-      if (window.innerWidth <= 768 && !sidebar.classList.contains('closed')) {
-        toggleSidebar();
-      }
+    // Kembali ke tampilan chat (tombol "Kembali", menu "Chatbot Asisten", atau setiap pesan baru)
+    function switchToChatView() {
+      // Tutup lapisan yang menumpuk (viewer PDF dan drawer di atasnya) dalam satu langkah history
+      const pdfIdx = layerStack.lastIndexOf('pdf');
+      if (pdfIdx !== -1) layerPopViaCode(layerStack.length - pdfIdx);
+      hidePdfViewer();
+      closeSidebar();   // sisa drawer (HP) kalau belum ikut tertutup
     }
 
     // Toast Notification
@@ -1386,7 +1979,11 @@
       const toastContainer = document.getElementById('toastContainer');
       const toast = document.createElement('div');
       toast.className = 'toast';
-      toast.innerHTML = `<span>✨</span> <span>${message}</span>`;
+      const icon = document.createElement('span');
+      icon.textContent = '✨';
+      const text = document.createElement('span');
+      text.textContent = message;   // textContent, bukan innerHTML: label dokumen/nama file tidak boleh diperlakukan sebagai HTML
+      toast.append(icon, text);
       toastContainer.appendChild(toast);
       setTimeout(() => {
         toast.style.opacity = '0';
@@ -1443,10 +2040,12 @@
       const inner = document.createElement('div');
       inner.className = 'bubble-content';
 
-      if (isMarkdown && role === 'bot') {
-        inner.innerHTML = DOMPurify.sanitize(marked.parse(contentText));
+      const renderedHtml = (isMarkdown && role === 'bot') ? renderMarkdown(contentText) : null;
+      if (renderedHtml !== null) {
+        inner.innerHTML = renderedHtml;
+        enhanceRenderedMarkdown(inner);
       } else {
-        inner.textContent = contentText;
+        inner.textContent = contentText;   // pesan user, atau library markdown gagal dimuat
       }
       bubble.appendChild(inner);
 
@@ -1469,19 +2068,38 @@
         accBody.className = 'sources-body';
 
         sources.forEach(src => {
-          const chip = document.createElement('div');
+          const label = docLabel(src.file);
+          const pageNum = Number(src.page) || 1;
+          const chip = document.createElement('button');
+          chip.type = 'button';
           chip.className = 'source-chip';
-          const fileStrong = document.createElement('strong');
-          fileStrong.textContent = src.file;
-          chip.append('📄 ', fileStrong, ` • Hal. ${src.page}`);
-          chip.onclick = () => openPdfDocument(src.file, src.file, null, src.page);
+          chip.title = `${src.file} — halaman ${pageNum}`;
+          const icon = document.createElement('span');
+          icon.textContent = '📄';
+          icon.setAttribute('aria-hidden', 'true');
+          const name = document.createElement('span');
+          name.className = 'chip-name';
+          name.textContent = label;
+          const pageBadge = document.createElement('span');
+          pageBadge.className = 'chip-page';
+          pageBadge.textContent = `Hal. ${pageNum}`;
+          chip.append(icon, name, pageBadge);
+          chip.addEventListener('click', () => openPdfDocument(src.file, label, null, pageNum));
           accBody.appendChild(chip);
         });
 
-        accHeader.onclick = () => {
+        const toggleSources = () => {
           const isHidden = accBody.style.display === 'none';
           accBody.style.display = isHidden ? 'flex' : 'none';
+          accHeader.setAttribute('aria-expanded', String(isHidden));
         };
+        accHeader.setAttribute('role', 'button');
+        accHeader.setAttribute('aria-expanded', 'true');
+        accHeader.tabIndex = 0;
+        accHeader.addEventListener('click', toggleSources);
+        accHeader.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSources(); }
+        });
 
         accordion.appendChild(accHeader);
         accordion.appendChild(accBody);
@@ -1498,9 +2116,13 @@
         const btnCopy = document.createElement('button');
         btnCopy.className = 'btn-action-sm';
         btnCopy.innerHTML = `<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Salin`;
-        btnCopy.onclick = () => {
-          navigator.clipboard.writeText(contentText);
-          showToast('Jawaban berhasil disalin!');
+        btnCopy.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(contentText);
+            showToast('Jawaban berhasil disalin!');
+          } catch (_) {
+            showToast('Gagal menyalin. Tahan teks jawaban lalu pilih Salin.');
+          }
         };
 
         actions.appendChild(btnCopy);
@@ -1566,6 +2188,7 @@
 
       appendMessage('user', question, [], false);
       clearInput();
+      if (isTouchDevice()) inputEl.blur();   // tutup keyboard HP supaya jawaban yang datang tidak tertutup
       setLoadingState(true);
       appendLoading();
 
@@ -1608,8 +2231,33 @@
         }
       } finally {
         setLoadingState(false);
-        inputEl.focus();
+        // Di HP jangan fokus otomatis: keyboard yang membuka sendiri akan menutupi jawaban yang baru datang
+        if (!isTouchDevice()) inputEl.focus();
       }
+    }
+
+    // Esc menutup drawer (HP) atau viewer PDF
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (isMobileLayout() && !sidebar.classList.contains('closed')) closeSidebar();
+      else if (pdfViewerMode.classList.contains('active')) switchToChatView();
+    });
+
+    // iOS Safari tidak mengecilkan 100dvh saat keyboard muncul (Chrome/Firefox Android sudah lewat
+    // interactive-widget=resizes-content). Samakan tinggi app dengan visualViewport supaya kotak input tetap
+    // terlihat di atas keyboard. Dilewati saat pinch-zoom (scale != 1) agar layout tidak ikut menyusut.
+    if (window.visualViewport) {
+      const syncAppHeight = () => {
+        const vv = window.visualViewport;
+        if (Math.abs(vv.scale - 1) > 0.01) return;
+        document.documentElement.style.setProperty('--app-h', vv.height + 'px');
+        if (document.activeElement === inputEl) {
+          window.scrollTo(0, 0);   // Safari menggeser layout viewport ke atas saat keyboard terbuka
+          chatStream.scrollTo({ top: chatStream.scrollHeight });
+        }
+      };
+      window.visualViewport.addEventListener('resize', syncAppHeight);
+      syncAppHeight();
     }
   </script>
 </body>
